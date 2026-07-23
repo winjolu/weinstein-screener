@@ -68,11 +68,17 @@ def _process_ticker(ticker, run_date):
 
 
 def _needs_manual_review(conditions_detail):
-    return any(
+    # pullback_quality/risk_reward only need a human look when they came
+    # back genuinely ambiguous (None). resistance_breakout always does,
+    # regardless of its result, since the pivot/trend-line read behind it
+    # is an approximation — see trend_support_resistance.py.
+    ambiguous_review = any(
         conditions_detail[name]["result"] is None and conditions_detail[name].get("manual_review")
         for name in ("pullback_quality", "risk_reward")
         if name in conditions_detail
     )
+    always_review = conditions_detail.get("resistance_breakout", {}).get("manual_review", False)
+    return ambiguous_review or always_review
 
 
 def _print_summary(rows):

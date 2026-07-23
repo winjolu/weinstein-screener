@@ -9,9 +9,12 @@ whatever sector match data_fetch.get_sector_data() could find. Conditions
 Conditions 8 and 9 are the two the book describes qualitatively rather
 than with hard numbers — I flag both for manual review in the output,
 and for 9 specifically I return None (not a guessed True/False) whenever
-the reward-to-risk margin is thin.
+the reward-to-risk margin is thin. Condition 7 also gets flagged for
+manual review, but for a different reason: it leans on
+trend_support_resistance.py, which is an approximation of a third-party
+charting concept pending verified source — see that module's docstring.
 """
-from . import mansfield_rs
+from . import mansfield_rs, moving_averages, sector_strength, trend_support_resistance
 
 ACTIONABLE_THRESHOLD = 8
 
@@ -34,20 +37,19 @@ VOLUME_CONFIRM_RATIO = 2.0
 RISK_REWARD_CLEAR_PASS = 1.5
 RISK_REWARD_CLEAR_FAIL = 1.0
 
+# Fallback threshold for condition 5 when I only have the sector-overview
+# change_ratio (data_fetch.get_sector_data) rather than the daily
+# sector-ETF-vs-SPY closes sector_strength.py actually wants.
 SECTOR_STRENGTH_THRESHOLD_PCT = 1.0
+# Percentile thresholds once daily closes are available.
+SECTOR_STRENGTH_PERCENTILE_PASS = 60
+SECTOR_STRENGTH_PERCENTILE_FAIL = 40
 
-
-def _sma_series(values, period):
-    """Simple moving average, same-length output, None during warm-up."""
-    result = [None] * len(values)
-    window_sum = 0.0
-    for i, v in enumerate(values):
-        window_sum += v
-        if i >= period:
-            window_sum -= values[i - period]
-        if i >= period - 1:
-            result[i] = window_sum / period
-    return result
+# Pivot/trend-line read for condition 7 — see trend_support_resistance.py's
+# module docstring for the approximation caveat these numbers live under.
+TSR_PIVOT_LENGTH = 5
+TSR_LOOKBACK_PIVOTS = 3
+TSR_TOLERANCE_PCT = 2.0
 
 
 def _volume_ratio_at(volumes, idx):
@@ -98,6 +100,11 @@ def _classify_stage(closes, ma_series):
 def _find_base_and_breakout(closes, highs):
     """Finds the resistance level of the most recent base and, if price has
     broken above it within the recent window, the index of that breakout bar.
+
+    This feeds conditions 1, 8, and 9, which all need a specific breakout
+    bar to reason about (was there one, how long ago, what was the base's
+    low). Condition 7 uses a separate pivot-based read from
+    trend_support_resistance.py instead — see _evaluate_resistance_breakout.
     """
     n = len(closes)
     if n < BASE_WINDOW + RECENT_WINDOW + 4:
@@ -185,12 +192,51 @@ def _evaluate_risk_reward(highs, lows, closes, resistance_level, breakout_idx, b
     return swing_target, swing_stop, result
 
 
+def _evaluate_resistance_breakout(bars, volumes, latest_idx):
+    """Condition 7, using the pivot-based resistance level from
+    trend_support_resistance.py instead of the base-window read the other
+    conditions share. Returns (result, detail) where detail carries the
+    pivot/level context worth checking against the real chart.
+    """
+    tsr_result = trend_support_resistance.analyze(
+        bars, pivot_length=TSR_PIVOT_LENGTH, lookback_pivots=TSR_LOOKBACK_PIVOTS,
+        tolerance_pct=TSR_TOLERANCE_PCT,
+    )
+    tsr_resistance = tsr_result["resistance_level"]
+
+    if tsr_resistance is None:
+        result = None
+    else:
+        volume_ratio_latest = _volume_ratio_at(volumes, latest_idx)
+        price_broke_out = bars[latest_idx]["close"] > tsr_resistance
+        if not price_broke_out:
+            result = False
+        elif volume_ratio_latest is None:
+            result = None
+        else:
+            result = volume_ratio_latest >= VOLUME_CONFIRM_RATIO
+
+    detail = {
+        "resistance_level": tsr_resistance,
+        "support_level": tsr_result["support_level"],
+        "resistance_tests": tsr_result["resistance_tests"],
+        "support_tests": tsr_result["support_tests"],
+        "trend_line": tsr_result["trend_line"],
+    }
+    return result, detail
+
+
 def evaluate_conditions(ticker, bars, index_bars, sector_data):
     """Evaluates all 9 checklist conditions for one ticker.
 
     :param bars: weekly OHLCV dicts for the ticker, oldest first.
     :param index_bars: weekly OHLCV dicts for the comparison index, oldest first.
     :param sector_data: dict from data_fetch.get_sector_data(ticker), or None.
+        If it also carries "sector_etf_closes" and "spy_daily_closes" (daily
+        closes, oldest first), condition 5 uses the percentile read from
+        sector_strength.py; otherwise it falls back to the sector-overview
+        change_ratio the way it always has, since data_fetch.py doesn't
+        fetch daily sector-ETF/SPY closes yet.
     :return: dict with per-condition results, a conditions_met count, and
         the derived fields (stage, price, MA, RS, swing levels, etc.) that
         run_screener.py writes into screener_results.
@@ -202,7 +248,7 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
     idx_closes = [b["close"] for b in index_bars]
 
     latest_idx = len(closes) - 1
-    ma_series = _sma_series(closes, MA_PERIOD)
+    ma_series = moving_averages.sma(closes, MA_PERIOD)
     ma_now = ma_series[latest_idx]
     ma_prior = ma_series[latest_idx - MA_SLOPE_LOOKBACK] if latest_idx >= MA_SLOPE_LOOKBACK else None
 
@@ -232,7 +278,7 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
     volume_confirmed = None if volume_ratio is None else volume_ratio >= VOLUME_CONFIRM_RATIO
 
     # Condition 4: Mansfield RS improving or positive.
-    mrs_series = mansfield_rs.compute_mansfield_rs(closes, idx_closes)
+    mrs_series, rs_ma_rising = mansfield_rs.compute_mansfield_rs(closes, idx_closes)
     mrs_now = mrs_series[latest_idx]
     mrs_prior = mrs_series[latest_idx - MA_SLOPE_LOOKBACK] if latest_idx >= MA_SLOPE_LOOKBACK else None
     rs_improving = None if mrs_now is None or mrs_prior is None else mrs_now > mrs_prior
@@ -246,31 +292,40 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         rs_condition = rs_improving
 
     # Condition 5: sector in a strong phase.
-    sector_strength_pct = sector_data.get("sector_strength_pct") if sector_data else None
-    if sector_strength_pct is None:
-        sector_strength = None
-    elif sector_strength_pct > SECTOR_STRENGTH_THRESHOLD_PCT:
-        sector_strength = True
-    elif sector_strength_pct < -SECTOR_STRENGTH_THRESHOLD_PCT:
-        sector_strength = False
+    sector_etf_closes = sector_data.get("sector_etf_closes") if sector_data else None
+    spy_daily_closes = sector_data.get("spy_daily_closes") if sector_data else None
+    sector_strength_percentile = None
+    if sector_etf_closes and spy_daily_closes:
+        sector_strength_percentile = sector_strength.get_sector_strength_percentile(
+            sector_etf_closes, spy_daily_closes
+        )
+
+    if sector_strength_percentile is not None:
+        if sector_strength_percentile >= SECTOR_STRENGTH_PERCENTILE_PASS:
+            sector_strength_result = True
+        elif sector_strength_percentile <= SECTOR_STRENGTH_PERCENTILE_FAIL:
+            sector_strength_result = False
+        else:
+            sector_strength_result = None
     else:
-        sector_strength = None
+        sector_strength_pct = sector_data.get("sector_strength_pct") if sector_data else None
+        if sector_strength_pct is None:
+            sector_strength_result = None
+        elif sector_strength_pct > SECTOR_STRENGTH_THRESHOLD_PCT:
+            sector_strength_result = True
+        elif sector_strength_pct < -SECTOR_STRENGTH_THRESHOLD_PCT:
+            sector_strength_result = False
+        else:
+            sector_strength_result = None
 
     # Condition 6: broader market not in a confirmed Stage 4.
-    idx_ma_series = _sma_series(idx_closes, MA_PERIOD)
+    idx_ma_series = moving_averages.sma(idx_closes, MA_PERIOD)
     market_stage = _classify_stage(idx_closes, idx_ma_series)
     market_stage_ok = None if market_stage is None else market_stage != 4
 
-    # Condition 7: resistance breakout with volume authority.
-    if resistance_level is None:
-        resistance_breakout = None
-    elif breakout_idx is None:
-        resistance_breakout = False
-    else:
-        breakout_volume_ratio = _volume_ratio_at(volumes, breakout_idx)
-        resistance_breakout = (
-            None if breakout_volume_ratio is None else breakout_volume_ratio >= VOLUME_CONFIRM_RATIO
-        )
+    # Condition 7: resistance breakout, pivot-based read (see caveat on
+    # trend_support_resistance.py — this is the lowest-confidence condition).
+    resistance_breakout, tsr_detail = _evaluate_resistance_breakout(bars, volumes, latest_idx)
 
     # Condition 8: pullback quality (None when the stock isn't in a pullback at all).
     pullback_quality = _evaluate_pullback(closes, volumes, resistance_level, breakout_idx, latest_idx)
@@ -285,7 +340,7 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         "price_above_ma": price_above_ma,
         "volume_confirmation": volume_confirmed,
         "rs_improving": rs_condition,
-        "sector_strength": sector_strength,
+        "sector_strength": sector_strength_result,
         "market_stage": market_stage_ok,
         "resistance_breakout": resistance_breakout,
         "pullback_quality": pullback_quality,
@@ -298,6 +353,17 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         entry = {"result": value}
         if name in ("pullback_quality", "risk_reward"):
             entry["manual_review"] = True
+        if name == "rs_improving":
+            entry["rs_ma_rising"] = rs_ma_rising
+        if name == "sector_strength":
+            entry["sector_strength_percentile"] = sector_strength_percentile
+        if name == "resistance_breakout":
+            entry["manual_review"] = True
+            entry["low_confidence"] = True
+            entry["low_confidence_reason"] = (
+                "pivot/trend-line read is an approximation pending verified source"
+            )
+            entry.update(tsr_detail)
         conditions_detail[name] = entry
 
     return {
@@ -311,6 +377,7 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         "ma_rising": ma_rising,
         "mansfield_rs": mrs_now,
         "rs_improving": rs_improving,
+        "rs_ma_rising": rs_ma_rising,
         "volume_ratio": volume_ratio,
         "volume_confirmed": volume_confirmed,
         "market_stage_ok": market_stage_ok,
