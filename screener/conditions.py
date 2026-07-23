@@ -15,7 +15,7 @@ trend_support_resistance.py, whose level/trend-line selection still
 carries an unverified tie-break rule and an unconfirmed pivot-window
 default for weekly data — see that module's docstring.
 """
-from . import mansfield_rs, moving_averages, sector_strength, trend_support_resistance
+from . import historical_levels, mansfield_rs, moving_averages, sector_strength, trend_support_resistance
 
 ACTIONABLE_THRESHOLD = 8
 
@@ -263,6 +263,15 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
     stage = _classify_stage(closes, ma_series)
     resistance_level, breakout_idx, base_start = _find_base_and_breakout(closes, highs)
 
+    # Rolling high/low context (5D/2W/52W/all-time) — not one of the 9
+    # conditions itself, just supporting context. new_52w_high is the one
+    # derived signal worth calling out directly: clearing the 52-week high
+    # is a classic strength tell on top of whatever the base-window
+    # resistance level above says.
+    price_levels = historical_levels.get_historical_high_low(bars)
+    week_52_high = price_levels["52W"]["high"]
+    new_52w_high = None if week_52_high is None else closes[latest_idx] >= week_52_high
+
     # Condition 1: proper stage setup.
     if stage is None:
         stage_setup = None
@@ -376,6 +385,13 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
             entry.update(tsr_detail)
         conditions_detail[name] = entry
 
+    # Not one of the 9 conditions, so it isn't in `conditions` above — just
+    # supporting context, stored the same way the per-condition detail is.
+    conditions_detail["historical_levels"] = {
+        "levels": price_levels,
+        "new_52w_high": new_52w_high,
+    }
+
     return {
         "conditions": conditions,
         "conditions_met": conditions_met,
@@ -395,6 +411,8 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         "breakout_confirmed": resistance_breakout,
         "swing_target": swing_target,
         "swing_stop": swing_stop,
+        "historical_levels": price_levels,
+        "new_52w_high": new_52w_high,
     }
 
 
