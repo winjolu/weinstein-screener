@@ -18,7 +18,10 @@ from webull.data.data_client import DataClient
 from webull.data.common.category import Category
 from webull.data.common.timespan import Timespan
 
+from . import sector_strength
+
 _data_client = None
+_spy_daily_closes_cache = None
 
 
 def _get_client():
@@ -109,35 +112,93 @@ def get_index_bars(index_symbol="SPX", lookback_weeks=104):
     return _bars_from_response(response, index_symbol)
 
 
+def _get_daily_closes(symbol, category, lookback_days=30):
+    """I pull daily closing prices for one symbol, oldest bar first.
+    lookback_days=30 gives comfortable margin over sector_strength.py's
+    default 20-day lookback (which needs 21 closes) after accounting for
+    the occasional gap.
+    """
+    client = _get_client()
+    response = client.market_data.get_batch_history_bar(
+        [symbol], category, Timespan.D.name, count=str(lookback_days)
+    )
+    return [b["close"] for b in _bars_from_response(response, symbol)]
+
+
+def _get_spy_daily_closes():
+    """SPY's daily closes are the same for every ticker in a run, so I fetch
+    them once per process instead of once per ticker.
+    """
+    global _spy_daily_closes_cache
+    if _spy_daily_closes_cache is None:
+        _spy_daily_closes_cache = _get_daily_closes("SPY", Category.US_ETF.name)
+    return _spy_daily_closes_cache
+
+
 def get_sector_data(ticker):
     """I look up a ticker's sector via its company profile, then match that
     name against the sector overview list to get the sector's own price-change
     stats. Webull's API doesn't expose a direct ticker-to-sector-id lookup, so
     this is a name match rather than an ID join — if it doesn't match cleanly
     I return sector_strength_pct=None rather than guessing.
+
+    The profile's classification comes back as an "industries" list (broadest
+    entry first, e.g. ["Software & IT Services", "Software"]), not a single
+    "sector"/"industry" field — confirmed against a live response. ETFs and
+    some funds carry an empty list here, which is a legitimate case, not a
+    data error, so that returns sector=None rather than raising.
+
+    Also fetches daily closes for the ticker's mapped sector ETF and for
+    SPY (via sector_strength.get_sector_etf's reference mapping), so
+    conditions.py can use the real percentile calculation instead of the
+    coarser change_ratio fallback below. That's supplementary to the
+    sector match itself, so a failure here doesn't fail the whole ticker —
+    it just leaves sector_etf_closes/spy_daily_closes as None and lets the
+    caller fall back.
     """
     client = _get_client()
 
     profile_response = client.instrument.get_company_profile(ticker, Category.US_STOCK.name)
     profile = profile_response.json()
-    sector_name = profile.get("sector") or profile.get("industry")
-    if not sector_name:
-        raise RuntimeError(
-            f"Webull company profile for {ticker} has no sector/industry field: {profile}"
-        )
+    industries = profile.get("industries") or []
+    if not industries:
+        return {"sector": None, "sector_strength_pct": None}
+    sector_name = industries[0]
+
+    sector_etf_closes = None
+    spy_daily_closes = None
+    try:
+        sector_etf = sector_strength.get_sector_etf(sector_name)
+        sector_etf_closes = _get_daily_closes(sector_etf, Category.US_ETF.name)
+        spy_daily_closes = _get_spy_daily_closes()
+    except Exception:
+        sector_etf_closes = None
+        spy_daily_closes = None
 
     sectors_response = client.screener.get_market_sectors(Category.US_STOCK.name, period="D5")
     sectors_payload = sectors_response.json()
-    sectors = sectors_payload.get("result") or sectors_payload.get("data") or []
+    # Confirmed against a live response: this comes back as a bare array,
+    # not wrapped in a "result"/"data" key like I'd originally guessed.
+    if isinstance(sectors_payload, list):
+        sectors = sectors_payload
+    else:
+        sectors = sectors_payload.get("result") or sectors_payload.get("data") or []
 
     match = next(
         (s for s in sectors if s.get("name", "").strip().lower() == sector_name.strip().lower()),
         None,
     )
     if match is None:
-        return {"sector": sector_name, "sector_strength_pct": None}
+        return {
+            "sector": sector_name,
+            "sector_strength_pct": None,
+            "sector_etf_closes": sector_etf_closes,
+            "spy_daily_closes": spy_daily_closes,
+        }
 
     return {
         "sector": sector_name,
         "sector_strength_pct": float(match["change_ratio"]) * 100,
+        "sector_etf_closes": sector_etf_closes,
+        "spy_daily_closes": spy_daily_closes,
     }
