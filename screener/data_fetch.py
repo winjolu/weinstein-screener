@@ -96,7 +96,12 @@ def get_index_bars(index_symbol="SPX", lookback_weeks=104):
     # Using SPY instead of SPX is mathematically equivalent for this formula —
     # MRS is a ratio-of-a-ratio, so the constant SPY/SPX price-scaling factor
     # cancels out. Only residual drift is SPY's ~0.09%/year expense ratio,
-    # negligible over a 52-week window.
+    # negligible over a 52-week window. Worth knowing: the reference
+    # calculation this project's Mansfield RS is checked against actually
+    # compares against a direct SPX-tracking feed by default, not SPY, so
+    # exact numeric parity with a chart running that default isn't expected
+    # regardless of the math above — the reasoning here is about why SPY is
+    # an acceptable proxy, not a claim that it reproduces that chart bar-for-bar.
     client = _get_client()
     response = client.market_data.get_batch_history_bar(
         [index_symbol], Category.US_ETF.name, Timespan.W.name, count=str(lookback_weeks)
