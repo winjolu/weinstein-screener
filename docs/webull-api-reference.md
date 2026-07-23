@@ -12,6 +12,9 @@ Fetched: 2026-07-20
 - Overview (App Key/Secret, digest signature): https://developer.webull.com/apis/docs/authentication/overview.md
 - Signature (HMAC-SHA1): https://developer.webull.com/apis/docs/authentication/signature.md
 - Token lifecycle: https://developer.webull.com/apis/docs/authentication/token.md
+- Registered application name: "weinsteinScreener" — Webull's developer
+  portal doesn't allow hyphens in application names, so this is the
+  camelCase form of this project's name, used only at registration.
 
 ## Market Data API
 - Overview: https://developer.webull.com/apis/docs/market-data-api/overview.md
