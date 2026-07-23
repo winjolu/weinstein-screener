@@ -11,8 +11,9 @@ than with hard numbers — I flag both for manual review in the output,
 and for 9 specifically I return None (not a guessed True/False) whenever
 the reward-to-risk margin is thin. Condition 7 also gets flagged for
 manual review, but for a different reason: it leans on
-trend_support_resistance.py, which is an approximation of a third-party
-charting concept pending verified source — see that module's docstring.
+trend_support_resistance.py, whose level/trend-line selection still
+carries an unverified tie-break rule and an unconfirmed pivot-window
+default for weekly data — see that module's docstring.
 """
 from . import mansfield_rs, moving_averages, sector_strength, trend_support_resistance
 
@@ -45,11 +46,18 @@ SECTOR_STRENGTH_THRESHOLD_PCT = 1.0
 SECTOR_STRENGTH_PERCENTILE_PASS = 60
 SECTOR_STRENGTH_PERCENTILE_FAIL = 40
 
-# Pivot/trend-line read for condition 7 — see trend_support_resistance.py's
-# module docstring for the approximation caveat these numbers live under.
-TSR_PIVOT_LENGTH = 5
-TSR_LOOKBACK_PIVOTS = 3
-TSR_TOLERANCE_PCT = 2.0
+# Pivot/trend-line read for condition 7 — these match the verified
+# reference defaults exactly. See trend_support_resistance.py's module
+# docstring for what's verified versus still approximate, including the
+# weekly-vs-daily pivot-window concern for TSR_PIVOT_LENGTH. The reference
+# calculation declares separate "points to check"/"max violation"/"except
+# bars" inputs for trend lines vs. support/resistance levels, but they
+# default to the same values and I don't have evidence they're ever set
+# differently, so I share one set of constants across both here.
+TSR_PIVOT_LENGTH = 20
+TSR_POINTS_TO_CHECK = 3
+TSR_MAX_VIOLATION = 0
+TSR_EXCEPT_BARS = 3
 
 
 def _volume_ratio_at(volumes, idx):
@@ -199,8 +207,8 @@ def _evaluate_resistance_breakout(bars, volumes, latest_idx):
     pivot/level context worth checking against the real chart.
     """
     tsr_result = trend_support_resistance.analyze(
-        bars, pivot_length=TSR_PIVOT_LENGTH, lookback_pivots=TSR_LOOKBACK_PIVOTS,
-        tolerance_pct=TSR_TOLERANCE_PCT,
+        bars, pivot_length=TSR_PIVOT_LENGTH, points_to_check=TSR_POINTS_TO_CHECK,
+        max_violation=TSR_MAX_VIOLATION, except_bars=TSR_EXCEPT_BARS,
     )
     tsr_resistance = tsr_result["resistance_level"]
 
@@ -218,9 +226,9 @@ def _evaluate_resistance_breakout(bars, volumes, latest_idx):
 
     detail = {
         "resistance_level": tsr_resistance,
+        "resistance_violations": tsr_result["resistance_violations"],
         "support_level": tsr_result["support_level"],
-        "resistance_tests": tsr_result["resistance_tests"],
-        "support_tests": tsr_result["support_tests"],
+        "support_violations": tsr_result["support_violations"],
         "trend_line": tsr_result["trend_line"],
     }
     return result, detail
@@ -361,7 +369,9 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
             entry["manual_review"] = True
             entry["low_confidence"] = True
             entry["low_confidence_reason"] = (
-                "pivot/trend-line read is an approximation pending verified source"
+                "pivot/trend-line level selection uses an unverified tie-break when "
+                "multiple candidates are valid, and the pivot window hasn't been "
+                "checked against weekly-bar behavior"
             )
             entry.update(tsr_detail)
         conditions_detail[name] = entry

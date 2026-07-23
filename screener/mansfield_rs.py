@@ -7,23 +7,29 @@ own SMA, so it oscillates around zero instead of drifting with price.
 """
 
 
-def compute_mansfield_rs(security_closes, index_closes, period=52, rs_ma_trend_lookback=5):
+def compute_mansfield_rs(security_closes, index_closes, period=52, rs_ma_trend_lookback=1):
     """I return (mrs, rs_ma_rising) for security_closes/index_closes.
 
     Both inputs must be same-length sequences, oldest bar first.
 
     mrs is a list aligned to the inputs; the first `period - 1` entries
-    come back as None since there isn't a full SMA window yet, matching
-    the Pine Script's `na` warm-up behavior. This part of the math is
-    unchanged from the verified version.
+    come back as None since there isn't a full SMA window yet. This part
+    of the math is verified correct: the reference calculation scales the
+    raw ratio by a constant (multiplies it by 100 before taking its own
+    SMA) purely for display purposes, but that constant cancels out
+    identically in the final ((ratio / SMA) - 1) * 100 expression — it has
+    zero effect on mrs, so I don't apply it here.
 
     rs_ma_rising is a single boolean (or None if there isn't enough
     warmed-up history to compare): whether the RS ratio's own SMA — the
-    denominator in the MRS formula — is trending upward over the last
-    `rs_ma_trend_lookback` bars. This is a distinct signal from mrs
-    itself: a stock can show a positive MRS breakout while the RS-MA
-    underneath it is still declining, which reads very differently on
-    the chart than a breakout under a rising RS-MA.
+    denominator in the MRS formula — is higher than it was
+    `rs_ma_trend_lookback` bars ago. The reference calculation for this
+    flag is a strict single-bar-over-bar comparison (this bar's SMA vs.
+    the immediately preceding bar's SMA), which is exactly what the
+    default of 1 reproduces. Raising this above 1 is a deliberate
+    departure from that verified behavior, not an equivalent multi-bar
+    smoothing of it — a "rising for N bars" check and a plain
+    N-bars-back comparison only happen to be the same thing when N=1.
     """
     if len(security_closes) != len(index_closes):
         raise ValueError("security_closes and index_closes must be the same length")
