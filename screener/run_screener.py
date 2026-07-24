@@ -12,7 +12,12 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from screener import conditions, data_fetch, db, sector_scan
+from screener import conditions, data_fetch, db, position_sizing, sector_scan, stop_loss
+
+# Cheap heuristic pointer for run_screener's summary only — not a real
+# evaluation. See conditions.py's module docstring for why the short
+# side isn't just these 9 conditions inverted.
+SHORT_CANDIDATE_MAX_CONDITIONS_MET = 3
 
 CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config")
 TICKERS_PATH = os.path.join(CONFIG_DIR, "tickers.json")
@@ -41,6 +46,26 @@ def _process_ticker(ticker, run_date):
 
     result = conditions.evaluate_conditions(ticker, bars, index_bars, sector_data)
 
+    # Stop-loss/entry-plan are only meaningful once a ticker actually
+    # qualifies, and only if there's a real breakout bar to size them
+    # against — a Stage 2 pass without a breakout inside the recent
+    # lookback window (see conditions.py's _find_base_and_breakout)
+    # leaves breakout_idx as None, and I'm not guessing an entry point.
+    stop = None
+    entry_plan = None
+    if conditions.is_actionable(result["conditions_met"]):
+        breakout_idx = result.get("breakout_idx")
+        if breakout_idx is not None:
+            breakout_price = bars[breakout_idx]["close"]
+            stop = stop_loss.trailing_stop(bars, breakout_price, breakout_idx)
+            entry_plan = position_sizing.get_entry_plan(breakout_price)
+
+    conditions_detail = result["conditions_detail"]
+    if stop is not None:
+        conditions_detail["stop_loss"] = stop
+    if entry_plan is not None:
+        conditions_detail["entry_plan"] = entry_plan
+
     row = {
         "ticker": ticker,
         "run_date": run_date,
@@ -61,11 +86,30 @@ def _process_ticker(ticker, run_date):
         "swing_target": result["swing_target"],
         "swing_stop": result["swing_stop"],
         "conditions_met": result["conditions_met"],
-        "conditions_detail": result["conditions_detail"],
+        "conditions_detail": conditions_detail,
         "notes": None,
+        "stop_loss": stop,
+        "entry_plan": entry_plan,
     }
     db.insert_result(row)
     return row
+
+
+def _looks_like_short_candidate(row):
+    """Cheap heuristic pointer only, not a real evaluation — flags
+    tickers scoring low on the long checklist while already in Stage 3/4
+    with declining or negative RS, so that signal isn't silently thrown
+    away before the real short checklist exists. See conditions.py's
+    module docstring.
+    """
+    if row["conditions_met"] > SHORT_CANDIDATE_MAX_CONDITIONS_MET:
+        return False
+    if row["stage"] not in (3, 4):
+        return False
+    mrs = row["mansfield_rs"]
+    negative_rs = mrs is not None and mrs < 0
+    declining_rs = row["rs_improving"] is False
+    return negative_rs or declining_rs
 
 
 def _needs_manual_review(conditions_detail):
@@ -87,14 +131,35 @@ def _print_summary(rows):
         print("No results.")
         return
 
-    header = f"{'TICKER':<8}{'STAGE':<7}{'MET':<5}{'ACTIONABLE':<12}{'REVIEW':<8}"
+    header = f"{'TICKER':<8}{'STAGE':<7}{'MET':<5}{'ACTIONABLE':<12}{'REVIEW':<8}{'SHORT?':<8}"
     print(header)
     print("-" * len(header))
     for row in rows:
-        actionable = "yes" if conditions.is_actionable(row["conditions_met"]) else "no"
+        is_actionable = conditions.is_actionable(row["conditions_met"])
+        actionable = "yes" if is_actionable else "no"
         review = "review" if _needs_manual_review(row["conditions_detail"]) else ""
         stage = row["stage"] if row["stage"] is not None else "?"
-        print(f"{row['ticker']:<8}{str(stage):<7}{row['conditions_met']:<5}{actionable:<12}{review:<8}")
+        short_flag = "short?" if _looks_like_short_candidate(row) else ""
+        print(
+            f"{row['ticker']:<8}{str(stage):<7}{row['conditions_met']:<5}"
+            f"{actionable:<12}{review:<8}{short_flag:<8}"
+        )
+
+        if is_actionable:
+            stop = row.get("stop_loss")
+            if stop:
+                print(
+                    f"    stop-loss ({stop['method']} recommended): "
+                    f"ma={stop['ma_stop']} swing_low={stop['swing_low_stop']} "
+                    f"-> {stop['recommended']}"
+                )
+            entry_plan = row.get("entry_plan")
+            if entry_plan:
+                entries = ", ".join(
+                    f"{e['size_pct']}% @ {e['price']:.2f} ({e['note']})"
+                    for e in entry_plan["entries"]
+                )
+                print(f"    entry plan ({entry_plan['style']}): {entries}")
 
 
 def _parse_args():

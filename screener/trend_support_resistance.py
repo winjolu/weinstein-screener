@@ -18,6 +18,17 @@ didn't have source for. Wherever more than one candidate is valid here,
 I pick the most recently anchored one as a single representative value —
 that selection rule is my own choice, not a confirmed match.
 
+One thing that's entirely my own addition, not from the reference
+calculation at all: a level whose every candidate pivot has been
+violated can mean two very different things — "not enough data" or
+"this stock broke out a while ago and never looked back, so there's no
+overhead resistance left." Those used to be indistinguishable (both
+just came back None). Now the latter gets its own status,
+"already_cleared" — set when the most recent candidate was broken
+through on a close and every close since has stayed on the breakout
+side, rather than a level that's just been poked through and pulled
+back.
+
 One more open question worth flagging: the pivot-window default was
 written for whatever chart resolution someone runs it on, and I don't
 know whether the real usage is on a daily or weekly chart. This project
@@ -124,10 +135,43 @@ def _count_lows_below_line(lows, line, except_bars):
     return count
 
 
-def _select_level(pivots, points_to_check, max_violation, except_bars, prices, direction):
+def _check_cleared_and_held(closes, level, set_idx, latest_idx, direction):
+    """Whether price broke through `level` at some point after `set_idx`
+    and has stayed on the breakout side ever since, checked against
+    closes rather than highs/lows — a level that's been cleanly held is a
+    much stronger signal than one that's just been poked through and
+    pulled back. Returns the index of the first clean break, or None if
+    it was never broken, or was broken but later fell back.
+    """
+    first_break_idx = None
+    for idx in range(set_idx + 1, latest_idx + 1):
+        is_through = closes[idx] > level if direction == "resistance" else closes[idx] < level
+        if is_through and first_break_idx is None:
+            first_break_idx = idx
+
+    if first_break_idx is None:
+        return None
+
+    for idx in range(first_break_idx, latest_idx + 1):
+        is_through = closes[idx] > level if direction == "resistance" else closes[idx] < level
+        if not is_through:
+            return None
+
+    return first_break_idx
+
+
+def _select_level(pivots, points_to_check, max_violation, except_bars, prices, closes, latest_idx, direction):
     """Considers only the most recent `points_to_check` pivots as level
     candidates, and returns the most recent one whose violation count is
-    within `max_violation` — or None if none qualify.
+    within `max_violation`.
+
+    If none qualify that way, this also checks whether the most recent
+    candidate was instead cleanly broken through and never revisited —
+    for a stock that's been in a sustained run, every historical pivot
+    can end up "violated" simply because price kept climbing (or
+    falling) past it and never looked back, which isn't the same thing
+    as "no data here." That case gets status "already_cleared" instead
+    of being indistinguishable from a genuinely unresolved None.
     """
     candidates = pivots[-points_to_check:]
     for idx, price in reversed(candidates):
@@ -136,7 +180,17 @@ def _select_level(pivots, points_to_check, max_violation, except_bars, prices, d
         else:
             violations = _count_support_violations(prices, price, idx, except_bars)
         if violations <= max_violation:
-            return {"level": price, "set_at_index": idx, "violations": violations}
+            return {"level": price, "set_at_index": idx, "violations": violations, "status": "holding"}
+
+    if candidates:
+        idx, price = candidates[-1]
+        cleared_at = _check_cleared_and_held(closes, price, idx, latest_idx, direction)
+        if cleared_at is not None:
+            return {
+                "level": price, "set_at_index": idx, "violations": None,
+                "status": "already_cleared", "cleared_at_index": cleared_at,
+            }
+
     return None
 
 
@@ -197,18 +251,23 @@ def analyze(bars, pivot_length=20, points_to_check=3, max_violation=0, except_ba
     """
     highs = [b["high"] for b in bars]
     lows = [b["low"] for b in bars]
+    closes = [b["close"] for b in bars]
+    latest_idx = len(bars) - 1
 
     pivot_highs = find_pivot_highs(highs, pivot_length)
     pivot_lows = find_pivot_lows(lows, pivot_length)
 
-    resistance = _select_level(pivot_highs, points_to_check, max_violation, except_bars, highs, "resistance")
-    support = _select_level(pivot_lows, points_to_check, max_violation, except_bars, lows, "support")
+    resistance = _select_level(
+        pivot_highs, points_to_check, max_violation, except_bars, highs, closes, latest_idx, "resistance"
+    )
+    support = _select_level(
+        pivot_lows, points_to_check, max_violation, except_bars, lows, closes, latest_idx, "support"
+    )
 
     uptrend_line = _select_trend_line(pivot_lows, points_to_check, max_violation, except_bars, lows, "support")
     downtrend_line = _select_trend_line(pivot_highs, points_to_check, max_violation, except_bars, highs, "resistance")
 
     trend_line = None
-    latest_idx = len(bars) - 1
     if uptrend_line:
         trend_line = {
             "type": "support",
@@ -226,9 +285,11 @@ def analyze(bars, pivot_length=20, points_to_check=3, max_violation=0, except_ba
         "resistance_level": resistance["level"] if resistance else None,
         "resistance_violations": resistance["violations"] if resistance else None,
         "resistance_set_at_index": resistance["set_at_index"] if resistance else None,
+        "resistance_status": resistance["status"] if resistance else None,
         "support_level": support["level"] if support else None,
         "support_violations": support["violations"] if support else None,
         "support_set_at_index": support["set_at_index"] if support else None,
+        "support_status": support["status"] if support else None,
         "trend_line": trend_line,
         "pivot_highs": pivot_highs,
         "pivot_lows": pivot_lows,
