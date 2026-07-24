@@ -112,11 +112,12 @@ def get_index_bars(index_symbol="SPX", lookback_weeks=104):
     return _bars_from_response(response, index_symbol)
 
 
-def _get_daily_closes(symbol, category, lookback_days=30):
+def get_daily_closes(symbol, category, lookback_days=30):
     """I pull daily closing prices for one symbol, oldest bar first.
     lookback_days=30 gives comfortable margin over sector_strength.py's
     default 20-day lookback (which needs 21 closes) after accounting for
-    the occasional gap.
+    the occasional gap. Public since both get_sector_data and
+    sector_scan.py's sector-ranking need it.
     """
     client = _get_client()
     response = client.market_data.get_batch_history_bar(
@@ -125,13 +126,14 @@ def _get_daily_closes(symbol, category, lookback_days=30):
     return [b["close"] for b in _bars_from_response(response, symbol)]
 
 
-def _get_spy_daily_closes():
-    """SPY's daily closes are the same for every ticker in a run, so I fetch
-    them once per process instead of once per ticker.
+def get_spy_daily_closes():
+    """SPY's daily closes are the same for every ticker in a run (or every
+    sector in a sector-ranking pass), so I fetch them once per process
+    instead of once per caller.
     """
     global _spy_daily_closes_cache
     if _spy_daily_closes_cache is None:
-        _spy_daily_closes_cache = _get_daily_closes("SPY", Category.US_ETF.name)
+        _spy_daily_closes_cache = get_daily_closes("SPY", Category.US_ETF.name)
     return _spy_daily_closes_cache
 
 
@@ -169,8 +171,8 @@ def get_sector_data(ticker):
     spy_daily_closes = None
     try:
         sector_etf = sector_strength.get_sector_etf(sector_name)
-        sector_etf_closes = _get_daily_closes(sector_etf, Category.US_ETF.name)
-        spy_daily_closes = _get_spy_daily_closes()
+        sector_etf_closes = get_daily_closes(sector_etf, Category.US_ETF.name)
+        spy_daily_closes = get_spy_daily_closes()
     except Exception:
         sector_etf_closes = None
         spy_daily_closes = None

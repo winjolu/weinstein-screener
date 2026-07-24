@@ -4,6 +4,7 @@ watchlist and writes results to data/screener.db.
 I add the project root to sys.path so this works whether it's invoked as
 `python -m screener.run_screener` or run directly as a script.
 """
+import argparse
 import datetime
 import json
 import os
@@ -11,7 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from screener import conditions, data_fetch, db
+from screener import conditions, data_fetch, db, sector_scan
 
 CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config")
 TICKERS_PATH = os.path.join(CONFIG_DIR, "tickers.json")
@@ -96,9 +97,29 @@ def _print_summary(rows):
         print(f"{row['ticker']:<8}{str(stage):<7}{row['conditions_met']:<5}{actionable:<12}{review:<8}")
 
 
+def _parse_args():
+    parser = argparse.ArgumentParser(description="Run the Weinstein stage-analysis screener.")
+    parser.add_argument(
+        "--broad", action="store_true",
+        help="Build the ticker list from the top-ranked sectors' curated universes "
+             "(screener/sector_scan.py) instead of reading config/tickers.json.",
+    )
+    parser.add_argument(
+        "--top-n", type=int, default=3,
+        help="Number of top-ranked sectors to pull into a --broad scan (default 3).",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = _parse_args()
     run_date = datetime.date.today().isoformat()
-    tickers = _load_tickers()
+
+    if args.broad:
+        tickers = sector_scan.build_watchlist_from_top_sectors(n=args.top_n)
+        print(f"--broad: built a {len(tickers)}-ticker watchlist from the top {args.top_n} sectors.")
+    else:
+        tickers = _load_tickers()
 
     db.init_db()
     db.seed_watchlist_from_config(tickers, run_date)
