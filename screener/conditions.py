@@ -16,6 +16,19 @@ manual review, but for a different reason: it leans on
 trend_support_resistance.py, whose level/trend-line selection still
 carries an unverified tie-break rule and an unconfirmed pivot-window
 default for weekly data — see that module's docstring.
+
+A "not actionable" result from evaluate_conditions() means the long
+checklist isn't satisfied — it does NOT mean there's nothing here.
+Depending on stage and RS direction, the same ticker may be a short
+candidate under a separate set of rules I haven't built yet. Short
+selling isn't just these 9 conditions inverted: several of them are
+asymmetric between long and short per the book — volume confirmation
+is required for a valid long breakout but explicitly not required for
+a valid short breakdown, for one. Until that separate checklist exists,
+run_screener.py's summary flags a cheap "short?" heuristic pointer
+(low long score, Stage 3/4, declining or negative RS) so this
+information isn't silently thrown away in the meantime — that flag is
+not a real evaluation, just a placeholder worth a manual look.
 """
 from . import historical_levels, mansfield_rs, moving_averages, sector_strength, trend_support_resistance
 
@@ -63,7 +76,13 @@ SECTOR_STRENGTH_PERCENTILE_FAIL = 40
 # differently, so I share one set of constants across both here.
 TSR_PIVOT_LENGTH = 20
 TSR_POINTS_TO_CHECK = 3
-TSR_MAX_VIOLATION = 0
+# Relaxed from the verified default of 0: on real weekly data, a strict
+# zero-violation requirement left almost every level unresolved even
+# with plenty of pivot candidates. Checked live — 2 was where genuinely
+# useful levels started resolving for real tickers without just letting
+# anything through. This is my own tuning, not part of the verified
+# reference default.
+TSR_MAX_VIOLATION = 2
 TSR_EXCEPT_BARS = 3
 
 
@@ -276,8 +295,17 @@ def _evaluate_resistance_breakout(bars, volumes, latest_idx):
         max_violation=TSR_MAX_VIOLATION, except_bars=TSR_EXCEPT_BARS,
     )
     tsr_resistance = tsr_result["resistance_level"]
+    resistance_status = tsr_result["resistance_status"]
 
-    if tsr_resistance is None:
+    if resistance_status == "already_cleared":
+        # Every candidate pivot was violated, but price broke through on
+        # a close and has stayed above it ever since — there's no
+        # overhead resistance left to test against a specific week's
+        # volume, so checking this week's volume_ratio doesn't answer a
+        # meaningful question here. Already cleared and held is itself
+        # the pass.
+        result = True
+    elif tsr_resistance is None:
         result = None
     else:
         volume_ratio_latest = _volume_ratio_at(volumes, latest_idx)
@@ -291,6 +319,7 @@ def _evaluate_resistance_breakout(bars, volumes, latest_idx):
 
     detail = {
         "resistance_level": tsr_resistance,
+        "resistance_status": resistance_status,
         "resistance_violations": tsr_result["resistance_violations"],
         "support_level": tsr_result["support_level"],
         "support_violations": tsr_result["support_violations"],
@@ -484,6 +513,7 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         "swing_stop": swing_stop,
         "historical_levels": price_levels,
         "new_52w_high": new_52w_high,
+        "breakout_idx": breakout_idx,
     }
 
 
