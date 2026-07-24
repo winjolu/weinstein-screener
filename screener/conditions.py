@@ -3,9 +3,11 @@
 None — I use None whenever the data genuinely doesn't support a confident
 call rather than forcing a guess either way.
 
-Conditions 2, 3, and 6 are mechanical thresholds. Condition 5 depends on
-whatever sector match data_fetch.get_sector_data() could find. Conditions
-1 and 7 lean on a stage/breakout read that can itself come back ambiguous.
+Conditions 2 and 6 are mechanical thresholds. Condition 3 is phase-aware
+rather than a single fixed threshold — see _evaluate_volume_confirmation.
+Condition 5 depends on whatever sector match data_fetch.get_sector_data()
+could find. Conditions 1 and 7 lean on a stage/breakout read that can
+itself come back ambiguous.
 Conditions 8 and 9 are the two the book describes qualitatively rather
 than with hard numbers — I flag both for manual review in the output,
 and for 9 specifically I return None (not a guessed True/False) whenever
@@ -30,6 +32,11 @@ MA_SLOPE_LOOKBACK = 5
 MA_SLOPE_THRESHOLD_PCT = 0.5
 
 VOLUME_CONFIRM_RATIO = 2.0
+# My own reading of "contraction" for the pullback half of condition 3 —
+# the book doesn't give a number, so below-average (< 1.0x the trailing
+# 4-week average) is my baseline for "volume is drying up," same spirit
+# as the other undefined thresholds in this file.
+VOLUME_CONTRACTION_RATIO = 1.0
 
 # My own operational cutoffs for reading the swing-rule reward/risk ratio —
 # the book gives the swing rule itself but not a numeric pass/fail line, so
@@ -77,15 +84,32 @@ def _classify_stage(closes, ma_series):
     The book's stage calls are ultimately a visual judgment, so I only
     resolve a stage when the MA slope and price position agree clearly;
     otherwise this returns None rather than forcing one of the 4 labels.
+
+    ma_series (the SMA, matching the book's own 30-week-MA definition)
+    stays the actual line price gets compared against for every branch
+    below — that doesn't change. What changed is how I read trend
+    *direction*: a plain 30-week SMA is slow enough that its slope keeps
+    pointing the old direction for a while after price has already
+    crossed it, which meant an early top or bottom (price just broke the
+    "wrong" way, MA hasn't caught up yet) was falling through every
+    branch as an unresolved None. I use a WMA's slope instead, which
+    reacts faster, and explicitly handle the two lopsided cases (MA
+    still trending one way, price already the other) as early Stage 3 or
+    Stage 1 rather than requiring the MA to go fully flat first.
     """
     latest = len(closes) - 1
     if latest < MA_SLOPE_LOOKBACK or ma_series[latest] is None or ma_series[latest - MA_SLOPE_LOOKBACK] is None:
         return None
 
+    wma_series = moving_averages.wma(closes, MA_PERIOD)
+    if wma_series[latest] is None or wma_series[latest - MA_SLOPE_LOOKBACK] is None:
+        return None
+
     ma_now = ma_series[latest]
-    ma_prior = ma_series[latest - MA_SLOPE_LOOKBACK]
     price = closes[latest]
-    slope_pct = (ma_now - ma_prior) / ma_prior * 100 if ma_prior else 0.0
+    wma_now = wma_series[latest]
+    wma_prior = wma_series[latest - MA_SLOPE_LOOKBACK]
+    slope_pct = (wma_now - wma_prior) / wma_prior * 100 if wma_prior else 0.0
 
     rising = slope_pct > MA_SLOPE_THRESHOLD_PCT
     falling = slope_pct < -MA_SLOPE_THRESHOLD_PCT
@@ -94,14 +118,21 @@ def _classify_stage(closes, ma_series):
         return 2
     if falling and price < ma_now:
         return 4
-    if not rising and not falling:
-        reference_idx = max(0, latest - 26)
-        reference = closes[reference_idx]
-        change_pct = (price - reference) / reference * 100 if reference else 0.0
-        if change_pct <= -10:
-            return 1
-        if change_pct >= 10:
-            return 3
+    if rising and price < ma_now:
+        return 3  # MA still trending up, price already broke below it — early top
+    if falling and price > ma_now:
+        return 1  # MA still trending down, price already broke above it — early base breakout
+
+    # Only genuinely flat-MA cases reach here — same stricter check as
+    # before, since a flat MA alone isn't enough to call a stage without
+    # a real prior move behind it.
+    reference_idx = max(0, latest - 26)
+    reference = closes[reference_idx]
+    change_pct = (price - reference) / reference * 100 if reference else 0.0
+    if change_pct <= -10:
+        return 1
+    if change_pct >= 10:
+        return 3
     return None
 
 
@@ -160,6 +191,40 @@ def _evaluate_pullback(closes, volumes, resistance_level, breakout_idx, latest_i
     volume_contracting = pullback_volume_avg < breakout_week_volume
 
     return bool(holding_above_breakout and volume_contracting)
+
+
+def _evaluate_volume_confirmation(volumes, breakout_idx, latest_idx, pullback_quality):
+    """Condition 3: "Volume confirmation on breakout; contraction on
+    pullbacks" (docs/methodology.md) — two different, opposite-direction
+    reads depending on which moment price is in, not one fixed threshold.
+
+    A flat "always need >= 2x volume" check contradicts condition 8's own
+    logic, which correctly treats lower volume during a pullback as a
+    good sign — so this needs to know the phase pullback_quality already
+    determined (None means "not currently in a pullback," per
+    _evaluate_pullback's own contract) rather than reading volume in
+    isolation.
+
+    Returns (result, volume_ratio, phase) where phase is one of
+    "breakout", "pullback", or "not_applicable" — stored for transparency
+    even though it isn't itself pass/fail.
+    """
+    volume_ratio = _volume_ratio_at(volumes, latest_idx)
+    if volume_ratio is None:
+        return None, None, "not_applicable"
+
+    at_fresh_breakout = breakout_idx is not None and breakout_idx == latest_idx
+    in_pullback = pullback_quality is not None
+
+    if at_fresh_breakout:
+        return volume_ratio >= VOLUME_CONFIRM_RATIO, volume_ratio, "breakout"
+    if in_pullback:
+        return volume_ratio < VOLUME_CONTRACTION_RATIO, volume_ratio, "pullback"
+
+    # Neither a fresh breakout nor an identified pullback — the book's
+    # volume rule is specifically about those two moments, so there's
+    # nothing meaningful to say about a week that's neither.
+    return None, volume_ratio, "not_applicable"
 
 
 def _evaluate_risk_reward(highs, lows, closes, resistance_level, breakout_idx, base_start):
@@ -290,9 +355,15 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
     # MA trend, stored alongside condition 2 but not itself one of the 9.
     ma_rising = None if ma_now is None or ma_prior is None else ma_now > ma_prior
 
-    # Condition 3: volume confirmation — latest week vs. its trailing 4-week average.
-    volume_ratio = _volume_ratio_at(volumes, latest_idx)
-    volume_confirmed = None if volume_ratio is None else volume_ratio >= VOLUME_CONFIRM_RATIO
+    # Condition 8 gets computed here rather than further down, since
+    # condition 3 needs its pullback read to know which of the book's two
+    # volume rules applies to this week.
+    pullback_quality = _evaluate_pullback(closes, volumes, resistance_level, breakout_idx, latest_idx)
+
+    # Condition 3: volume confirmation on breakout, contraction on pullbacks.
+    volume_confirmed, volume_ratio, volume_phase = _evaluate_volume_confirmation(
+        volumes, breakout_idx, latest_idx, pullback_quality
+    )
 
     # Condition 4: Mansfield RS improving or positive.
     mrs_series, rs_ma_rising = mansfield_rs.compute_mansfield_rs(closes, idx_closes)
@@ -344,9 +415,6 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
     # trend_support_resistance.py — this is the lowest-confidence condition).
     resistance_breakout, tsr_detail = _evaluate_resistance_breakout(bars, volumes, latest_idx)
 
-    # Condition 8: pullback quality (None when the stock isn't in a pullback at all).
-    pullback_quality = _evaluate_pullback(closes, volumes, resistance_level, breakout_idx, latest_idx)
-
     # Condition 9: risk/reward via the swing rule.
     swing_target, swing_stop, risk_reward = _evaluate_risk_reward(
         highs, lows, closes, resistance_level, breakout_idx, base_start
@@ -370,6 +438,9 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         entry = {"result": value}
         if name in ("pullback_quality", "risk_reward"):
             entry["manual_review"] = True
+        if name == "volume_confirmation":
+            entry["volume_ratio"] = volume_ratio
+            entry["phase"] = volume_phase
         if name == "rs_improving":
             entry["rs_ma_rising"] = rs_ma_rising
         if name == "sector_strength":
