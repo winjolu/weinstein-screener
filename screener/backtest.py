@@ -279,7 +279,7 @@ def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, paramete
                 print(f"[{ticker}] {as_of_date} evaluate_as_of failed — {exc}")
                 continue
 
-            if not conditions.is_actionable(result["conditions_met"]):
+            if not result["actionable"]:
                 continue
 
             breakout_idx = result.get("breakout_idx")

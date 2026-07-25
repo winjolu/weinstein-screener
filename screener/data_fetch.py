@@ -5,6 +5,7 @@ on GitHub) for the client classes referenced below — the hosted docs don't
 show Market Data client code directly, so I confirmed these against the SDK
 source itself.
 """
+import datetime
 import os
 
 try:
@@ -71,16 +72,60 @@ def _bars_from_response(response, symbol):
     ]
 
 
-def get_weekly_bars(ticker, lookback_weeks=104):
-    """I pull weekly OHLCV bars for one ticker, oldest bar first."""
+def _is_partial_week(bar_date_str, today=None):
+    """True when a weekly bar belongs to a week that hasn't finished
+    trading yet.
+
+    Weekly bars come back stamped with the last trading day *so far* in
+    their week, so the newest one is a live, still-forming bar whenever
+    it lands in the current week on a weekday. Its volume is only a
+    fraction of a full week's and its high/low/close can all still move,
+    which quietly corrupts everything downstream — the volume ratio is
+    measured against a 4-week average of *complete* weeks, and the
+    30-week MA, stage classification, and Mansfield RS all read that
+    unfinished close as if it were final.
+
+    Saturday and Sunday count as finished: on a weekend the week's final
+    bar shares the same ISO week as today, but trading is over, so it's
+    complete. This stays deliberately conservative on Friday itself —
+    the bar is treated as partial until the weekend, since the bar data
+    alone can't tell me whether an early close or holiday schedule
+    applied to that session.
+    """
+    today = today or datetime.date.today()
+    bar_date = datetime.date.fromisoformat(bar_date_str)
+    if bar_date.isocalendar()[:2] != today.isocalendar()[:2]:
+        return False
+    return today.weekday() < 5
+
+
+def _drop_partial_week(bars, include_partial_week):
+    """Strips a still-forming final weekly bar. Callers may get one bar
+    fewer than they asked for, which is the intended trade — a complete
+    bar short beats a contaminated bar long.
+    """
+    if include_partial_week or not bars:
+        return bars
+    if _is_partial_week(bars[-1]["time"][:10]):
+        return bars[:-1]
+    return bars
+
+
+def get_weekly_bars(ticker, lookback_weeks=104, include_partial_week=False):
+    """I pull weekly OHLCV bars for one ticker, oldest bar first.
+
+    The in-progress week is dropped by default — see _is_partial_week.
+    Pass include_partial_week=True only to deliberately inspect the
+    live, unfinished week.
+    """
     client = _get_client()
     response = client.market_data.get_batch_history_bar(
         [ticker], Category.US_STOCK.name, Timespan.W.name, count=str(lookback_weeks)
     )
-    return _bars_from_response(response, ticker)
+    return _drop_partial_week(_bars_from_response(response, ticker), include_partial_week)
 
 
-def get_index_bars(index_symbol="SPX", lookback_weeks=104):
+def get_index_bars(index_symbol="SPX", lookback_weeks=104, include_partial_week=False):
     """I pull weekly OHLCV bars for the index used in the Mansfield RS comparison.
 
     Webull's OpenAPI Category enum only covers US_STOCK/US_ETF/US_OPTION/etc —
@@ -109,7 +154,7 @@ def get_index_bars(index_symbol="SPX", lookback_weeks=104):
     response = client.market_data.get_batch_history_bar(
         [index_symbol], Category.US_ETF.name, Timespan.W.name, count=str(lookback_weeks)
     )
-    return _bars_from_response(response, index_symbol)
+    return _drop_partial_week(_bars_from_response(response, index_symbol), include_partial_week)
 
 
 def get_daily_bars(symbol, category, lookback_days=30):
