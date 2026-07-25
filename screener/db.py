@@ -42,6 +42,22 @@ CREATE TABLE IF NOT EXISTS tickers_watchlist (
     added_date TEXT NOT NULL,
     active BOOLEAN NOT NULL DEFAULT 1
 );
+
+CREATE TABLE IF NOT EXISTS backtest_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    as_of_date TEXT NOT NULL,
+    entry_date TEXT NOT NULL,
+    entry_price REAL,
+    exit_date TEXT,
+    exit_price REAL,
+    exit_reason TEXT,
+    return_pct REAL,
+    r_multiple REAL,
+    conditions_met INTEGER,
+    parameter_set TEXT,
+    still_open BOOLEAN
+);
 """
 
 RESULT_COLUMNS = [
@@ -50,6 +66,12 @@ RESULT_COLUMNS = [
     "volume_confirmed", "sector", "sector_strength_pct", "market_stage_ok",
     "resistance_level", "breakout_confirmed", "swing_target", "swing_stop",
     "conditions_met", "conditions_detail", "notes",
+]
+
+BACKTEST_TRADE_COLUMNS = [
+    "ticker", "as_of_date", "entry_date", "entry_price", "exit_date",
+    "exit_price", "exit_reason", "return_pct", "r_multiple",
+    "conditions_met", "parameter_set", "still_open",
 ]
 
 
@@ -137,5 +159,44 @@ def get_ticker_history(ticker, weeks_back):
             (ticker, weeks_back),
         ).fetchall()
         return [dict(r) for r in reversed(rows)]
+    finally:
+        conn.close()
+
+
+def insert_backtest_trade(trade):
+    """I insert one simulated trade from backtest.py. Unknown keys in
+    `trade` beyond BACKTEST_TRADE_COLUMNS are ignored, same filtering
+    approach as insert_result.
+    """
+    conn = _connect()
+    try:
+        columns = [c for c in BACKTEST_TRADE_COLUMNS if c in trade]
+        placeholders = ", ".join("?" for _ in columns)
+        conn.execute(
+            f"INSERT INTO backtest_trades ({', '.join(columns)}) VALUES ({placeholders})",
+            [trade[c] for c in columns],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_backtest_trades(parameter_set=None):
+    """I return backtest_trades rows, optionally filtered to one
+    parameter_set, oldest as_of_date first.
+    """
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        if parameter_set is None:
+            rows = conn.execute(
+                "SELECT * FROM backtest_trades ORDER BY parameter_set, as_of_date"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM backtest_trades WHERE parameter_set = ? ORDER BY as_of_date",
+                (parameter_set,),
+            ).fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
