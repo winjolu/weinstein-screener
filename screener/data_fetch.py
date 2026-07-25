@@ -112,6 +112,21 @@ def get_index_bars(index_symbol="SPX", lookback_weeks=104):
     return _bars_from_response(response, index_symbol)
 
 
+def get_daily_bars(symbol, category, lookback_days=30):
+    """I pull daily OHLCV bars for one symbol, oldest bar first, with
+    timestamps preserved. get_daily_closes() is a thin wrapper that keeps
+    just the closes for the live sector_strength percentile calculation,
+    which doesn't need timestamps — but backtest.py does, to truncate a
+    series to a specific historical date, which is why this exists as
+    its own function rather than being folded into get_daily_closes.
+    """
+    client = _get_client()
+    response = client.market_data.get_batch_history_bar(
+        [symbol], category, Timespan.D.name, count=str(lookback_days)
+    )
+    return _bars_from_response(response, symbol)
+
+
 def get_daily_closes(symbol, category, lookback_days=30):
     """I pull daily closing prices for one symbol, oldest bar first.
     lookback_days=30 gives comfortable margin over sector_strength.py's
@@ -119,11 +134,7 @@ def get_daily_closes(symbol, category, lookback_days=30):
     the occasional gap. Public since both get_sector_data and
     sector_scan.py's sector-ranking need it.
     """
-    client = _get_client()
-    response = client.market_data.get_batch_history_bar(
-        [symbol], category, Timespan.D.name, count=str(lookback_days)
-    )
-    return [b["close"] for b in _bars_from_response(response, symbol)]
+    return [b["close"] for b in get_daily_bars(symbol, category, lookback_days)]
 
 
 def get_spy_daily_closes():
@@ -204,3 +215,37 @@ def get_sector_data(ticker):
         "sector_etf_closes": sector_etf_closes,
         "spy_daily_closes": spy_daily_closes,
     }
+
+
+def get_sector_data_for_backtest(ticker, lookback_days):
+    """Like get_sector_data(), but for backtest.py: returns full
+    timestamped daily bars for the ticker's mapped sector ETF and for
+    SPY, not just the most recent 30 days of bare closes, so the series
+    can be truncated to any historical as_of_date.
+
+    Deliberately never includes a sector_strength_pct — that field comes
+    from get_market_sectors(), a live snapshot with no historical/as-of
+    parameter in Webull's API at all, so there's no way to ask it "what
+    was this on a past date." Using today's value for a historical
+    evaluation would be lookahead bias, not an approximation, so
+    backtest.py never reads it. See backtest.py's module docstring.
+    """
+    client = _get_client()
+
+    profile_response = client.instrument.get_company_profile(ticker, Category.US_STOCK.name)
+    profile = profile_response.json()
+    industries = profile.get("industries") or []
+    sector_name = industries[0] if industries else None
+
+    sector_etf_bars = []
+    spy_bars = []
+    if sector_name:
+        try:
+            sector_etf = sector_strength.get_sector_etf(sector_name)
+            sector_etf_bars = get_daily_bars(sector_etf, Category.US_ETF.name, lookback_days)
+            spy_bars = get_daily_bars("SPY", Category.US_ETF.name, lookback_days)
+        except Exception:
+            sector_etf_bars = []
+            spy_bars = []
+
+    return {"sector": sector_name, "sector_etf_bars": sector_etf_bars, "spy_bars": spy_bars}
