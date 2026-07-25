@@ -58,7 +58,9 @@ def _process_ticker(ticker, run_date):
         if breakout_idx is not None:
             breakout_price = bars[breakout_idx]["close"]
             stop = stop_loss.trailing_stop(bars, breakout_price, breakout_idx)
-            entry_plan = position_sizing.get_entry_plan(breakout_price)
+            entry_plan = position_sizing.get_entry_plan(
+                breakout_price, current_price=result["price"]
+            )
 
     conditions_detail = result["conditions_detail"]
     if stop is not None:
@@ -91,8 +93,11 @@ def _process_ticker(ticker, run_date):
         "stop_loss": stop,
         "entry_plan": entry_plan,
         # In-memory only for the summary table — db.insert_result filters
-        # to RESULT_COLUMNS, and scoring persists inside conditions_detail.
+        # to RESULT_COLUMNS, and these persist inside conditions_detail.
         "scoring": result["scoring"],
+        "breakout_age_weeks": result["breakout_age_weeks"],
+        "base_is_tight": result["base_is_tight"],
+        "base_range_pct": result["base_range_pct"],
     }
     db.insert_result(row)
     return row
@@ -164,6 +169,15 @@ def _print_summary(rows):
                     f"ma={stop['ma_stop']} swing_low={stop['swing_low_stop']} "
                     f"-> {stop['recommended']}"
                 )
+            age = row.get("breakout_age_weeks")
+            if age is not None:
+                tight = row.get("base_is_tight")
+                rng = row.get("base_range_pct")
+                tightness = "" if tight is None else (
+                    f", base {'tight' if tight else 'LOOSE'} ({rng:.0f}% wide)"
+                )
+                print(f"    breakout was {age} week(s) ago{tightness}")
+
             entry_plan = row.get("entry_plan")
             if entry_plan:
                 entries = ", ".join(
@@ -171,6 +185,8 @@ def _print_summary(rows):
                     for e in entry_plan["entries"]
                 )
                 print(f"    entry plan ({entry_plan['style']}): {entries}")
+                if entry_plan.get("note"):
+                    print(f"    {entry_plan['note']}")
 
 
 def _parse_args():

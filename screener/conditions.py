@@ -73,11 +73,18 @@ NON_NEGOTIABLE_CONDITIONS = ("stage_setup", "price_above_ma", "market_stage")
 # Kept for reference: the legacy absolute threshold this replaced.
 ACTIONABLE_THRESHOLD = 8
 
-# How far back (in weeks) I look for the base that preceded a breakout,
-# and how many recent weeks count as "still close to the breakout."
+# How many weeks of consolidation a breakout has to clear to count as
+# one, and how far back before that base I look for the prior peak the
+# swing rule measures from.
 BASE_WINDOW = 26
-RECENT_WINDOW = 8
 PRE_BASE_LOOKBACK = 52
+
+# A base wider than this (high-to-low, as a percentage of its high) isn't
+# really a consolidation — it's a wide swing that happens to have a
+# highest point. My own cutoff, not the book's; it's reported rather than
+# used to reject, so a loose base shows up for review instead of being
+# silently treated the same as a tight one.
+BASE_MAX_RANGE_PCT = 40.0
 
 MA_PERIOD = 30
 MA_SLOPE_LOOKBACK = 5
@@ -194,30 +201,74 @@ def _classify_stage(closes, ma_series):
     return None
 
 
-def _find_base_and_breakout(closes, highs):
-    """Finds the resistance level of the most recent base and, if price has
-    broken above it within the recent window, the index of that breakout bar.
+def _find_base_and_breakout(closes, highs, lows):
+    """Locates the most recent breakout event and the consolidation it
+    emerged from.
+
+    The previous version didn't detect anything. It assumed the base was
+    always exactly the fixed slice bars[-34:-8] and only looked for a
+    breakout in the final 8 weeks, so anything that broke out earlier
+    simply vanished. Measured across a real 15-ticker scan, 7 had no
+    detectable breakout at all, which cascaded into three conditions
+    (volume, pullback, risk/reward) all returning None and left most of
+    the universe unable to reach a verdict.
+
+    A breakout bar closes above every high in the preceding BASE_WINDOW
+    weeks. In a sustained advance that stays true for many consecutive
+    bars, so the meaningful one is the *first* of such a run — the
+    transition out of the base — not the latest. I scan backward for the
+    most recent False->True transition to find it.
 
     This feeds conditions 1, 8, and 9, which all need a specific breakout
-    bar to reason about (was there one, how long ago, what was the base's
-    low). Condition 7 uses a separate pivot-based read from
-    trend_support_resistance.py instead — see _evaluate_resistance_breakout.
+    bar to reason about. Condition 7 uses a separate pivot-based read
+    from trend_support_resistance.py — see _evaluate_resistance_breakout.
     """
     n = len(closes)
-    if n < BASE_WINDOW + RECENT_WINDOW + 4:
-        return None, None, None
+    empty = {
+        "resistance_level": None, "breakout_idx": None, "base_start": None,
+        "base_end": None, "breakout_age_weeks": None, "base_range_pct": None,
+        "base_is_tight": None,
+    }
+    if n < BASE_WINDOW + 4:
+        return empty
 
-    base_start = n - BASE_WINDOW - RECENT_WINDOW
-    base_end = n - RECENT_WINDOW
-    resistance_level = max(highs[base_start:base_end])
+    def is_breakout(i):
+        return closes[i] > max(highs[i - BASE_WINDOW:i])
 
     breakout_idx = None
-    for i in range(base_end, n):
-        if closes[i] > resistance_level:
+    for i in range(n - 1, BASE_WINDOW, -1):
+        if is_breakout(i) and not is_breakout(i - 1):
             breakout_idx = i
             break
 
-    return resistance_level, breakout_idx, base_start
+    # A run that was already underway at the earliest bar I can test:
+    # there's no False->True transition inside the data, but the breakout
+    # is real, it just happened before this history starts.
+    if breakout_idx is None and is_breakout(BASE_WINDOW):
+        breakout_idx = BASE_WINDOW
+
+    if breakout_idx is None:
+        return empty
+
+    base_end = breakout_idx
+    base_start = max(0, breakout_idx - BASE_WINDOW)
+    resistance_level = max(highs[base_start:base_end])
+    base_low = min(lows[base_start:base_end])
+    base_range_pct = (
+        (resistance_level - base_low) / resistance_level * 100 if resistance_level else None
+    )
+
+    return {
+        "resistance_level": resistance_level,
+        "breakout_idx": breakout_idx,
+        "base_start": base_start,
+        "base_end": base_end,
+        "breakout_age_weeks": (n - 1) - breakout_idx,
+        "base_range_pct": base_range_pct,
+        "base_is_tight": (
+            base_range_pct is not None and base_range_pct <= BASE_MAX_RANGE_PCT
+        ),
+    }
 
 
 def _evaluate_pullback(closes, volumes, resistance_level, breakout_idx, latest_idx):
@@ -285,10 +336,14 @@ def _evaluate_volume_confirmation(volumes, breakout_idx, latest_idx, pullback_qu
     return None, volume_ratio, "not_applicable"
 
 
-def _evaluate_risk_reward(highs, lows, closes, resistance_level, breakout_idx, base_start):
+def _evaluate_risk_reward(highs, lows, closes, resistance_level, breakout_idx, base_start, base_end):
     """Condition 9, Weinstein's swing rule: project the point-distance of the
     decline into the base up from the breakout price, and compare that
     reward against the risk back down to the base's low.
+
+    The base bounds are passed in now that they're detected rather than
+    assumed, since base_start + BASE_WINDOW is no longer guaranteed to
+    equal base_end (an early breakout clamps base_start at zero).
     """
     if resistance_level is None or breakout_idx is None or base_start is None:
         return None, None, None
@@ -299,7 +354,6 @@ def _evaluate_risk_reward(highs, lows, closes, resistance_level, breakout_idx, b
         return None, None, None
 
     peak_price = max(highs[pre_base_start:pre_base_end])
-    base_end = base_start + BASE_WINDOW
     swing_low = min(lows[base_start:base_end])
     decline_distance = peak_price - swing_low
 
@@ -394,7 +448,10 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
     ma_prior = ma_series[latest_idx - MA_SLOPE_LOOKBACK] if latest_idx >= MA_SLOPE_LOOKBACK else None
 
     stage = _classify_stage(closes, ma_series)
-    resistance_level, breakout_idx, base_start = _find_base_and_breakout(closes, highs)
+    base = _find_base_and_breakout(closes, highs, lows)
+    resistance_level = base["resistance_level"]
+    breakout_idx = base["breakout_idx"]
+    base_start = base["base_start"]
 
     # Rolling high/low context (5D/2W/52W/all-time) — not one of the 9
     # conditions itself, just supporting context. new_52w_high is the one
@@ -485,7 +542,7 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
 
     # Condition 9: risk/reward via the swing rule.
     swing_target, swing_stop, risk_reward = _evaluate_risk_reward(
-        highs, lows, closes, resistance_level, breakout_idx, base_start
+        highs, lows, closes, resistance_level, breakout_idx, base_start, base["base_end"]
     )
 
     conditions = {
@@ -531,6 +588,11 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         "levels": price_levels,
         "new_52w_high": new_52w_high,
     }
+
+    # Also context rather than a condition: which consolidation the
+    # breakout came out of, how long ago, and whether that base was
+    # actually tight enough to call it one.
+    conditions_detail["base"] = base
     # Persisted alongside the per-condition detail rather than as its own
     # DB column, same pattern as historical_levels — no schema change.
     conditions_detail["scoring"] = scoring
@@ -559,6 +621,9 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         "historical_levels": price_levels,
         "new_52w_high": new_52w_high,
         "breakout_idx": breakout_idx,
+        "breakout_age_weeks": base["breakout_age_weeks"],
+        "base_is_tight": base["base_is_tight"],
+        "base_range_pct": base["base_range_pct"],
     }
 
 
