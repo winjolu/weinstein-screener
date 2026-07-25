@@ -30,8 +30,47 @@ run_screener.py's summary flags a cheap "short?" heuristic pointer
 information isn't silently thrown away in the meantime — that flag is
 not a real evaluation, just a placeholder worth a manual look.
 """
+import math
+
 from . import historical_levels, mansfield_rs, moving_averages, sector_strength, trend_support_resistance
 
+# Scoring model. The old rule — "at least 8 of 9 True" — quietly treated
+# None exactly like False, which contradicts the whole reason this file
+# returns None in the first place. Measured against real tickers, that
+# meant several could never be flagged actionable no matter how good the
+# setup was, purely because two conditions came back "unknown": a stock
+# with 7 True / 0 False / 2 None was scored the same as one with 7 True
+# / 2 False. Those are very different situations.
+#
+# So unknowns are now excluded from the ratio instead of counted as
+# failures, with two guards so that excluding them can't manufacture a
+# signal out of thin air:
+#
+#   1. An evidence floor — enough conditions have to actually resolve
+#      before any verdict is meaningful.
+#   2. Hard gates — a False on any structurally non-negotiable condition
+#      disqualifies outright, regardless of how good the ratio looks.
+#      These three are the ones the book treats as prerequisites rather
+#      than as weighable evidence: the stage setup itself, price above
+#      the 30-week MA, and not buying into a confirmed Stage 4 market.
+#
+# ACTIONABLE_SCORE is set so the full-information case is unchanged from
+# the old rule: with all 9 resolved, ceil(0.8 * 9) = 8, exactly the
+# previous threshold. Fewer resolved conditions require proportionally
+# fewer passes, but never a smaller share of them.
+ACTIONABLE_SCORE = 0.80
+# Tolerate at most two unknowns. Three is too thin to act on, and not
+# for a generic sample-size reason: the conditions that most often come
+# back unknown are resistance_breakout, pullback_quality and
+# volume_confirmation — precisely the entry-*trigger* ones. Three
+# unknowns therefore tends to mean "I can see this stock is in a good
+# stage and trend, but I have no evidence about whether it's actually
+# breaking out right now," which is exactly when a screener should not
+# be saying "actionable."
+MIN_RESOLVED_CONDITIONS = 7
+NON_NEGOTIABLE_CONDITIONS = ("stage_setup", "price_above_ma", "market_stage")
+
+# Kept for reference: the legacy absolute threshold this replaced.
 ACTIONABLE_THRESHOLD = 8
 
 # How far back (in weeks) I look for the base that preceded a breakout,
@@ -461,6 +500,7 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         "risk_reward": risk_reward,
     }
     conditions_met = sum(1 for v in conditions.values() if v is True)
+    scoring = score_conditions(conditions)
 
     conditions_detail = {}
     for name, value in conditions.items():
@@ -491,10 +531,15 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         "levels": price_levels,
         "new_52w_high": new_52w_high,
     }
+    # Persisted alongside the per-condition detail rather than as its own
+    # DB column, same pattern as historical_levels — no schema change.
+    conditions_detail["scoring"] = scoring
 
     return {
         "conditions": conditions,
         "conditions_met": conditions_met,
+        "scoring": scoring,
+        "actionable": scoring["actionable"],
         "conditions_detail": conditions_detail,
         "stage": stage,
         "price": closes[latest_idx],
@@ -517,6 +562,60 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
     }
 
 
-def is_actionable(conditions_met):
-    """True only once at least 8 of the 9 conditions have passed."""
-    return conditions_met >= ACTIONABLE_THRESHOLD
+def score_conditions(conditions):
+    """Turns the 9 raw True/False/None results into a verdict that keeps
+    "failed" and "unknown" distinct. See the scoring constants above for
+    why. Returns the full picture rather than one number, so output can
+    show *why* something did or didn't qualify.
+    """
+    met = sum(1 for v in conditions.values() if v is True)
+    failed = sum(1 for v in conditions.values() if v is False)
+    unknown = sum(1 for v in conditions.values() if v is None)
+    resolved = met + failed
+
+    blocking = [name for name in NON_NEGOTIABLE_CONDITIONS if conditions.get(name) is False]
+    required = math.ceil(ACTIONABLE_SCORE * resolved) if resolved else None
+
+    if blocking:
+        actionable = False
+        reason = "blocked by non-negotiable condition(s): " + ", ".join(blocking)
+    elif resolved < MIN_RESOLVED_CONDITIONS:
+        actionable = False
+        reason = (
+            f"only {resolved} of {len(conditions)} conditions resolved — "
+            f"need {MIN_RESOLVED_CONDITIONS} before a verdict means anything"
+        )
+    elif met >= required:
+        actionable = True
+        reason = f"{met} of {resolved} resolved conditions met"
+    else:
+        actionable = False
+        reason = f"{met} of {resolved} resolved conditions met, need {required}"
+
+    return {
+        "actionable": actionable,
+        "reason": reason,
+        "met": met,
+        "failed": failed,
+        "unknown": unknown,
+        "resolved": resolved,
+        "required": required,
+        "score": (met / resolved) if resolved else None,
+        "blocking": blocking,
+    }
+
+
+def is_actionable(value):
+    """Accepts either the dict returned by evaluate_conditions() or a
+    bare conditions dict, and reports whether it qualifies.
+
+    This deliberately no longer accepts a bare conditions_met integer —
+    that count alone can't distinguish a failed condition from an
+    unresolved one, which is exactly the ambiguity this scoring model
+    exists to remove.
+    """
+    if "scoring" in value:
+        return value["scoring"]["actionable"]
+    if "conditions" in value:
+        return score_conditions(value["conditions"])["actionable"]
+    return score_conditions(value)["actionable"]

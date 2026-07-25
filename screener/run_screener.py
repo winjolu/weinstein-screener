@@ -53,7 +53,7 @@ def _process_ticker(ticker, run_date):
     # leaves breakout_idx as None, and I'm not guessing an entry point.
     stop = None
     entry_plan = None
-    if conditions.is_actionable(result["conditions_met"]):
+    if result["actionable"]:
         breakout_idx = result.get("breakout_idx")
         if breakout_idx is not None:
             breakout_price = bars[breakout_idx]["close"]
@@ -90,6 +90,9 @@ def _process_ticker(ticker, run_date):
         "notes": None,
         "stop_loss": stop,
         "entry_plan": entry_plan,
+        # In-memory only for the summary table — db.insert_result filters
+        # to RESULT_COLUMNS, and scoring persists inside conditions_detail.
+        "scoring": result["scoring"],
     }
     db.insert_result(row)
     return row
@@ -131,19 +134,27 @@ def _print_summary(rows):
         print("No results.")
         return
 
-    header = f"{'TICKER':<8}{'STAGE':<7}{'MET':<5}{'ACTIONABLE':<12}{'REVIEW':<8}{'SHORT?':<8}"
+    header = (
+        f"{'TICKER':<8}{'STAGE':<7}{'MET':<5}{'FAIL':<6}{'UNK':<5}"
+        f"{'ACTIONABLE':<12}{'REVIEW':<8}{'SHORT?':<8}"
+    )
     print(header)
     print("-" * len(header))
     for row in rows:
-        is_actionable = conditions.is_actionable(row["conditions_met"])
+        scoring = row["scoring"]
+        is_actionable = scoring["actionable"]
         actionable = "yes" if is_actionable else "no"
         review = "review" if _needs_manual_review(row["conditions_detail"]) else ""
         stage = row["stage"] if row["stage"] is not None else "?"
         short_flag = "short?" if _looks_like_short_candidate(row) else ""
         print(
-            f"{row['ticker']:<8}{str(stage):<7}{row['conditions_met']:<5}"
-            f"{actionable:<12}{review:<8}{short_flag:<8}"
+            f"{row['ticker']:<8}{str(stage):<7}{scoring['met']:<5}{scoring['failed']:<6}"
+            f"{scoring['unknown']:<5}{actionable:<12}{review:<8}{short_flag:<8}"
         )
+        # Blocked-by-hard-gate and not-enough-evidence are very different
+        # from "narrowly missed", so say which one it was.
+        if not is_actionable and (scoring["blocking"] or scoring["resolved"] < conditions.MIN_RESOLVED_CONDITIONS):
+            print(f"    {scoring['reason']}")
 
         if is_actionable:
             stop = row.get("stop_loss")
