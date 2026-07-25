@@ -104,6 +104,29 @@ VOLUME_CONTRACTION_RATIO = 1.0
 RISK_REWARD_CLEAR_PASS = 1.5
 RISK_REWARD_CLEAR_FAIL = 1.0
 
+# Where the initial stop belongs. The book's worked examples tuck it just
+# under a nearby support level — buy at 20 3/8 with the stop at 19 1/8,
+# buy at 38 with the stop under 36 — which risks roughly 5-6%. Using the
+# base's absolute low instead put stops 28-40% below entry on real
+# tickers, which made every risk/reward reading meaningless and is
+# exactly what the book warns against when it talks about buying stocks
+# too far above their stop-loss points.
+# How many weeks back from the breakout to look for the support the stop
+# sits under. This is the immediate consolidation price thrust out of —
+# searching the whole base instead put the stop under a low from up to
+# half a year earlier, which on a trending stock is 20-40% away and not
+# a stop anyone would actually place. The exact window is my own
+# operational choice; the book picks the level visually off the chart.
+STOP_SUPPORT_WINDOW = 8
+STOP_BUFFER_PCT = 1.0
+MAX_SENSIBLE_STOP_PCT = 15.0
+
+# The swing rule measures from "the peak price before an important
+# decline". A shallow dip isn't one, and without a real decline there's
+# nothing for the rule to measure. This cutoff for "important" is mine,
+# not the book's.
+MIN_IMPORTANT_DECLINE_PCT = 10.0
+
 # Fallback threshold for condition 5 when I only have the sector-overview
 # change_ratio (data_fetch.get_sector_data) rather than the daily
 # sector-ETF-vs-SPY closes sector_strength.py actually wants.
@@ -336,37 +359,151 @@ def _evaluate_volume_confirmation(volumes, breakout_idx, latest_idx, pullback_qu
     return None, volume_ratio, "not_applicable"
 
 
+def _find_initial_stop(lows, base_start, base_end, resistance_level, entry):
+    """The initial stop belongs just beneath the support price thrust out
+    of, which is what the book's examples do — not at the bottom of the
+    entire base.
+
+    Two wrong turns worth recording, since both produced plausible-looking
+    numbers that were badly wrong. Searching the whole base for a swing
+    low put the stop under a low from up to half a year earlier: 20-40%
+    away on a trending stock, which is what the original base-low version
+    already did and is not a stop anyone would place. Using the cleared
+    resistance instead went the other way — resistance is the base's high,
+    so it outranks every low inside that base by construction, collapsing
+    the stop to 1-2% and passing all fifteen tickers on ratios up to 30:1.
+    A condition that passes everything is as uninformative as one that
+    fails everything.
+
+    So: the low of the immediate pre-breakout consolidation, tucked under
+    by a small buffer. Only bars up to the breakout are considered, so
+    this is a level that could genuinely have been set at entry rather
+    than one confirmed in hindsight.
+    """
+    window_start = max(base_start, base_end - STOP_SUPPORT_WINDOW)
+    window = [low for low in lows[window_start:base_end] if low < entry]
+    if window:
+        return min(window) * (1 - STOP_BUFFER_PCT / 100), "pre_breakout_low"
+
+    if resistance_level is not None and resistance_level < entry:
+        return resistance_level * (1 - STOP_BUFFER_PCT / 100), "breakout_level"
+
+    return None, "unavailable"
+
+
 def _evaluate_risk_reward(highs, lows, closes, resistance_level, breakout_idx, base_start, base_end):
-    """Condition 9, Weinstein's swing rule: project the point-distance of the
-    decline into the base up from the breakout price, and compare that
-    reward against the risk back down to the base's low.
+    """Condition 9. Three corrections from what this used to compute, each
+    checked against the book's own worked examples:
+
+    1. The swing rule projects from the peak that preceded the decline,
+       not from the entry price. Take that peak, subtract the low that
+       followed it, and add the difference back onto the peak.
+    2. It only comes into force once price has bettered that old peak.
+       Before then the nearest real objective is the peak itself, so
+       that's what I measure against, labelled as such.
+    3. The stop goes just under the nearest support below entry — see
+       _find_initial_stop.
+
+    The book also notes the swing rule "doesn't appear often" and uses it
+    for partial profit-taking rather than as an entry gate. When there was
+    no important decline to measure I fall back to projecting the base's
+    own height, labelled distinctly since that's a standard measured-move
+    idea rather than anything the book prescribes.
 
     The base bounds are passed in now that they're detected rather than
     assumed, since base_start + BASE_WINDOW is no longer guaranteed to
     equal base_end (an early breakout clamps base_start at zero).
     """
     if resistance_level is None or breakout_idx is None or base_start is None:
-        return None, None, None
+        return None, None, None, {}
+
+    entry = closes[breakout_idx]
+    base_low = min(lows[base_start:base_end])
+
+    stop, stop_method = _find_initial_stop(lows, base_start, base_end, resistance_level, entry)
+    if stop is None:
+        return None, None, None, {"stop_method": stop_method}
 
     pre_base_end = base_start
     pre_base_start = max(0, pre_base_end - PRE_BASE_LOOKBACK)
-    if pre_base_start >= pre_base_end:
-        return None, None, None
+    peak_price = None
+    decline_low = None
+    if pre_base_start < pre_base_end:
+        pre_base = highs[pre_base_start:pre_base_end]
+        peak_price = max(pre_base)
+        peak_idx = pre_base_start + pre_base.index(peak_price)
+        # The rule's low is the bottom of the decline that followed the
+        # peak, which generally forms *before* the base proper and so
+        # falls outside the base window. Measuring from the base's own low
+        # instead understates the decline — checked against the book's
+        # worked example, where it produced 36.25 against a stated 37.75.
+        decline_low = min(lows[peak_idx:base_end])
 
-    peak_price = max(highs[pre_base_start:pre_base_end])
-    swing_low = min(lows[base_start:base_end])
-    decline_distance = peak_price - swing_low
+    decline_pct = (
+        ((peak_price - decline_low) / peak_price * 100)
+        if peak_price and decline_low is not None and peak_price > decline_low else None
+    )
+    important_decline = decline_pct is not None and decline_pct >= MIN_IMPORTANT_DECLINE_PCT
 
-    entry = closes[breakout_idx]
-    swing_target = entry + decline_distance
-    swing_stop = swing_low
+    # The rule's geometry is peak -> decline -> base -> breakout back
+    # above that peak. That only holds if the base actually formed below
+    # the old peak. When the base's own high already sits above it, price
+    # never "betters an old peak" in the sense the rule means, and
+    # projecting from a peak the stock left behind long ago produces
+    # targets underneath the current price — which is what was making six
+    # of fifteen tickers report negative reward.
+    swing_rule_applies = important_decline and peak_price > resistance_level
 
-    reward = swing_target - entry
-    risk = entry - swing_stop
+    if swing_rule_applies and entry > peak_price:
+        target = peak_price + (peak_price - decline_low)
+        target_method = "swing_rule"
+    elif swing_rule_applies:
+        target = peak_price
+        target_method = "prior_peak"
+    else:
+        target = resistance_level + (resistance_level - base_low)
+        target_method = "base_height_fallback"
+
+    reward = target - entry
+    risk = entry - stop
+    stop_pct = (risk / entry * 100) if entry else None
+
+    detail = {
+        "target_method": target_method,
+        "stop_method": stop_method,
+        "prior_peak": peak_price,
+        "base_low": base_low,
+        "decline_low": decline_low,
+        "decline_pct": decline_pct,
+        "reward": reward,
+        "risk": risk,
+        "stop_pct": stop_pct,
+        "stop_too_wide": stop_pct is not None and stop_pct > MAX_SENSIBLE_STOP_PCT,
+    }
+
     if risk <= 0:
-        return swing_target, swing_stop, None
+        return target, stop, None, detail
+
+    if detail["stop_too_wide"]:
+        # The nearest genuine support is so far below entry that the
+        # position would risk more than the book ever countenances — it
+        # warns specifically about buying stocks too far above their
+        # stop-loss points. A favourable ratio doesn't rescue that: the
+        # ratio is about proportion, this is about absolute exposure on a
+        # single position. Reported rather than silently tightened,
+        # because a stop placed closer than real support is fiction.
+        detail["ratio"] = reward / risk
+        return target, stop, False, detail
+
+    if reward <= 0:
+        # The measured objective already sits at or below the entry, so
+        # there's no favourable reward left to weigh. That's a definite
+        # answer, not an unknown one.
+        detail["ratio"] = reward / risk
+        return target, stop, False, detail
 
     ratio = reward / risk
+    detail["ratio"] = ratio
     if ratio >= RISK_REWARD_CLEAR_PASS:
         result = True
     elif ratio <= RISK_REWARD_CLEAR_FAIL:
@@ -374,7 +511,7 @@ def _evaluate_risk_reward(highs, lows, closes, resistance_level, breakout_idx, b
     else:
         result = None  # thin margin — flagged for manual review below
 
-    return swing_target, swing_stop, result
+    return target, stop, result, detail
 
 
 def _evaluate_resistance_breakout(bars, volumes, latest_idx):
@@ -541,7 +678,7 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
     resistance_breakout, tsr_detail = _evaluate_resistance_breakout(bars, volumes, latest_idx)
 
     # Condition 9: risk/reward via the swing rule.
-    swing_target, swing_stop, risk_reward = _evaluate_risk_reward(
+    swing_target, swing_stop, risk_reward, risk_reward_detail = _evaluate_risk_reward(
         highs, lows, closes, resistance_level, breakout_idx, base_start, base["base_end"]
     )
 
@@ -564,6 +701,8 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         entry = {"result": value}
         if name in ("pullback_quality", "risk_reward"):
             entry["manual_review"] = True
+        if name == "risk_reward":
+            entry.update(risk_reward_detail)
         if name == "volume_confirmation":
             entry["volume_ratio"] = volume_ratio
             entry["phase"] = volume_phase
