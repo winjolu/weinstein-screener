@@ -19,10 +19,18 @@ from webull.data.data_client import DataClient
 from webull.data.common.category import Category
 from webull.data.common.timespan import Timespan
 
-from . import sector_strength
+from . import db, rate_limit, sector_strength
+
+# Hard server-side cap, confirmed against a live response: asking for more
+# comes back as "symbols size must be between 1 and 20". Every bar fetch
+# in this project used to pass a single symbol, which spent 5% of each
+# call's capacity.
+MAX_SYMBOLS_PER_BATCH = 20
 
 _data_client = None
 _spy_daily_closes_cache = None
+_sector_etf_closes_cache = {}
+_market_sectors_cache = None
 
 
 def _get_client():
@@ -41,13 +49,74 @@ def _get_client():
     return _data_client
 
 
-def _bars_from_response(response, symbol):
-    """I unpack a batch-bars response into OHLCV dicts, oldest bar first.
+def _parse_bar(bar):
+    return {
+        "time": bar["time"],
+        "open": float(bar["open"]),
+        "high": float(bar["high"]),
+        "low": float(bar["low"]),
+        "close": float(bar["close"]),
+        "volume": float(bar["volume"]),
+    }
 
-    I'm assuming Webull returns bars newest-first, matching how most vendors'
-    "last N bars" endpoints behave, and reverse here so index -1 is always
-    the latest bar. I haven't confirmed this against a live response yet —
-    worth double-checking the first time this runs for real.
+
+def _bars_from_batch_response(response):
+    """Unpacks a multi-symbol batch response into {symbol: bars}.
+
+    Deliberately tolerant where the single-symbol unpacker is strict: it
+    raises when a symbol has no bars, which is right when the caller asked
+    for exactly one thing, but wrong for a batch of 20 where a single
+    delisted or data-less ticker would otherwise discard the other 19.
+    Symbols that come back empty are simply absent from the result, and
+    the caller decides what that means.
+    """
+    payload = response.json()
+    entries = payload if isinstance(payload, list) else payload.get("result", []) or []
+
+    out = {}
+    for entry in entries:
+        symbol = entry.get("symbol")
+        bars = entry.get("result") or []
+        if not symbol or not bars:
+            continue
+        out[symbol] = [_parse_bar(b) for b in reversed(bars)]
+    return out
+
+
+def get_weekly_bars_batch(tickers, lookback_weeks=104, include_partial_week=False):
+    """Weekly bars for many tickers, batched at the server's 20-symbol
+    limit. Returns {symbol: bars}; symbols the API had nothing for are
+    omitted rather than raising.
+
+    This is the single biggest lever on API budget in the project — a
+    full-market sweep of ~3,200 tradable names costs about 160 calls here
+    versus 3,200 one at a time.
+    """
+    client = _get_client()
+    out = {}
+    for i in range(0, len(tickers), MAX_SYMBOLS_PER_BATCH):
+        chunk = list(tickers[i:i + MAX_SYMBOLS_PER_BATCH])
+        rate_limit.acquire()
+        try:
+            response = client.market_data.get_batch_history_bar(
+                chunk, Category.US_STOCK.name, Timespan.W.name, count=str(lookback_weeks)
+            )
+        except Exception as exc:
+            # One bad chunk shouldn't end a market-wide sweep.
+            print(f"[batch {i//MAX_SYMBOLS_PER_BATCH}] {len(chunk)} symbols skipped — {exc}")
+            continue
+        for symbol, bars in _bars_from_batch_response(response).items():
+            out[symbol] = _drop_partial_week(bars, include_partial_week)
+    return out
+
+
+def _bars_from_response(response, symbol):
+    """I unpack a single symbol's bars into OHLCV dicts, oldest bar first.
+
+    Bars come back newest-first and get reversed here so index -1 is
+    always the latest — confirmed against live responses, as is the fact
+    that prices are split-adjusted (checked across a 10:1 split, which
+    shows no artificial gap).
     """
     payload = response.json()
     bars = []
@@ -59,17 +128,7 @@ def _bars_from_response(response, symbol):
     if not bars:
         raise RuntimeError(f"Webull returned no bars for {symbol}: {payload}")
 
-    return [
-        {
-            "time": bar["time"],
-            "open": float(bar["open"]),
-            "high": float(bar["high"]),
-            "low": float(bar["low"]),
-            "close": float(bar["close"]),
-            "volume": float(bar["volume"]),
-        }
-        for bar in reversed(bars)
-    ]
+    return [_parse_bar(bar) for bar in reversed(bars)]
 
 
 def _is_partial_week(bar_date_str, today=None):
@@ -119,6 +178,7 @@ def get_weekly_bars(ticker, lookback_weeks=104, include_partial_week=False):
     live, unfinished week.
     """
     client = _get_client()
+    rate_limit.acquire()
     response = client.market_data.get_batch_history_bar(
         [ticker], Category.US_STOCK.name, Timespan.W.name, count=str(lookback_weeks)
     )
@@ -151,6 +211,7 @@ def get_index_bars(index_symbol="SPX", lookback_weeks=104, include_partial_week=
     # regardless of the math above — the reasoning here is about why SPY is
     # an acceptable proxy, not a claim that it reproduces that chart bar-for-bar.
     client = _get_client()
+    rate_limit.acquire()
     response = client.market_data.get_batch_history_bar(
         [index_symbol], Category.US_ETF.name, Timespan.W.name, count=str(lookback_weeks)
     )
@@ -166,6 +227,7 @@ def get_daily_bars(symbol, category, lookback_days=30):
     its own function rather than being folded into get_daily_closes.
     """
     client = _get_client()
+    rate_limit.acquire()
     response = client.market_data.get_batch_history_bar(
         [symbol], category, Timespan.D.name, count=str(lookback_days)
     )
@@ -193,6 +255,61 @@ def get_spy_daily_closes():
     return _spy_daily_closes_cache
 
 
+def get_sector_etf_closes(sector_etf):
+    """Daily closes for one sector ETF, cached per process.
+
+    The whole sector map resolves to about a dozen distinct ETFs, so
+    fetching these per *ticker* — which is what get_sector_data used to
+    do — repeated the same handful of calls thousands of times over a
+    wide scan. Cached, this costs at most a dozen calls per run no
+    matter how many tickers are screened.
+    """
+    if sector_etf not in _sector_etf_closes_cache:
+        _sector_etf_closes_cache[sector_etf] = get_daily_closes(sector_etf, Category.US_ETF.name)
+    return _sector_etf_closes_cache[sector_etf]
+
+
+def get_market_sectors():
+    """The sector overview snapshot, cached per process — it's identical
+    for every ticker, so calling it per ticker was pure waste.
+    """
+    global _market_sectors_cache
+    if _market_sectors_cache is None:
+        client = _get_client()
+        rate_limit.acquire()
+        payload = client.screener.get_market_sectors(Category.US_STOCK.name, period="D5").json()
+        # Confirmed against a live response: this comes back as a bare
+        # array, not wrapped in a "result"/"data" key.
+        if isinstance(payload, list):
+            _market_sectors_cache = payload
+        else:
+            _market_sectors_cache = payload.get("result") or payload.get("data") or []
+    return _market_sectors_cache
+
+
+def get_company_sector(ticker):
+    """A ticker's sector name, cached in SQLite across runs.
+
+    A company's sector classification effectively never changes, so
+    paying a live call for it on every run of every scan is the single
+    biggest avoidable cost once the universe is wide. The cached value is
+    reused indefinitely; db.get_cached_sector's own TTL decides when it
+    goes stale. Returns None for ETFs and funds, which legitimately carry
+    no industry classification.
+    """
+    cached = db.get_cached_sector(ticker)
+    if cached is not None:
+        return cached["sector"]
+
+    client = _get_client()
+    rate_limit.acquire()
+    profile = client.instrument.get_company_profile(ticker, Category.US_STOCK.name).json()
+    industries = profile.get("industries") or []
+    sector_name = industries[0] if industries else None
+    db.cache_sector(ticker, sector_name)
+    return sector_name
+
+
 def get_sector_data(ticker):
     """I look up a ticker's sector via its company profile, then match that
     name against the sector overview list to get the sector's own price-change
@@ -214,33 +331,21 @@ def get_sector_data(ticker):
     it just leaves sector_etf_closes/spy_daily_closes as None and lets the
     caller fall back.
     """
-    client = _get_client()
-
-    profile_response = client.instrument.get_company_profile(ticker, Category.US_STOCK.name)
-    profile = profile_response.json()
-    industries = profile.get("industries") or []
-    if not industries:
+    sector_name = get_company_sector(ticker)
+    if not sector_name:
         return {"sector": None, "sector_strength_pct": None}
-    sector_name = industries[0]
 
     sector_etf_closes = None
     spy_daily_closes = None
     try:
         sector_etf = sector_strength.get_sector_etf(sector_name)
-        sector_etf_closes = get_daily_closes(sector_etf, Category.US_ETF.name)
+        sector_etf_closes = get_sector_etf_closes(sector_etf)
         spy_daily_closes = get_spy_daily_closes()
     except Exception:
         sector_etf_closes = None
         spy_daily_closes = None
 
-    sectors_response = client.screener.get_market_sectors(Category.US_STOCK.name, period="D5")
-    sectors_payload = sectors_response.json()
-    # Confirmed against a live response: this comes back as a bare array,
-    # not wrapped in a "result"/"data" key like I'd originally guessed.
-    if isinstance(sectors_payload, list):
-        sectors = sectors_payload
-    else:
-        sectors = sectors_payload.get("result") or sectors_payload.get("data") or []
+    sectors = get_market_sectors()
 
     match = next(
         (s for s in sectors if s.get("name", "").strip().lower() == sector_name.strip().lower()),
@@ -277,6 +382,7 @@ def get_sector_data_for_backtest(ticker, lookback_days):
     """
     client = _get_client()
 
+    rate_limit.acquire()
     profile_response = client.instrument.get_company_profile(ticker, Category.US_STOCK.name)
     profile = profile_response.json()
     industries = profile.get("industries") or []
