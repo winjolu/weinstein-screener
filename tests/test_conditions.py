@@ -167,6 +167,83 @@ class ScoringTest(unittest.TestCase):
         self.assertEqual(result["resolved"], result["met"] + result["failed"])
 
 
+class EvaluationWindowTest(unittest.TestCase):
+    """Fetch depth must not change a verdict.
+
+    Pivot detection scans the whole series it's given, so before the
+    window was enforced the live screener (104 weeks) and the backtest
+    (nearer 170) could reach different conclusions about the same stock
+    on the same date. Nothing reported that; the answers just disagreed
+    depending on which caller asked.
+    """
+
+    # Exactly EVALUATION_WEEKS of decline -> base -> breakout. Anything
+    # prepended to this is history the evaluation must not see.
+    CORE = [
+        (58.0, 30.0, 33.0, 20),
+        (40.0, 32.0, 36.0, 74),
+        (48.0, 40.0, 46.0, 10),
+    ]
+    # Deliberately extreme, and long enough to clear the window. Flat
+    # filler here is what made the first version of this test vacuous:
+    # dropping bars indistinguishable from their neighbours changes
+    # nothing, so it passed even with the window disabled.
+    PREFIX = [(300.0, 250.0, 280.0, 30)]
+
+    def _core_bars(self):
+        highs, lows, closes = _series(self.CORE)
+        dates = weekly_dates(len(closes))
+        return [bar(d, h, l, c) for d, h, l, c in zip(dates, highs, lows, closes)]
+
+    def _prefixed_bars(self):
+        highs, lows, closes = _series(self.PREFIX + self.CORE)
+        dates = weekly_dates(len(closes))
+        return [bar(d, h, l, c) for d, h, l, c in zip(dates, highs, lows, closes)]
+
+    def test_core_is_exactly_one_window(self):
+        self.assertEqual(len(self._core_bars()), C.EVALUATION_WEEKS)
+
+    def test_extra_history_does_not_change_the_verdict(self):
+        sector = {"sector": None, "sector_strength_pct": None}
+        deep = self._prefixed_bars()
+        shallow = self._core_bars()
+
+        a = C.evaluate_conditions("T", deep, deep, sector)
+        b = C.evaluate_conditions("T", shallow, shallow, sector)
+
+        self.assertEqual(a["conditions"], b["conditions"])
+        self.assertEqual(a["scoring"], b["scoring"])
+        self.assertEqual(a["swing_stop"], b["swing_stop"])
+        self.assertEqual(a["swing_target"], b["swing_target"])
+        self.assertEqual(a["resistance_level"], b["resistance_level"])
+        self.assertEqual(a["breakout_age_weeks"], b["breakout_age_weeks"])
+        self.assertEqual(a["mansfield_rs"], b["mansfield_rs"])
+        # The sharpest of these: an all-time high computed over whatever
+        # the caller fetched is precisely the leak this window closes.
+        self.assertEqual(a["historical_levels"], b["historical_levels"])
+        self.assertEqual(a["new_52w_high"], b["new_52w_high"])
+
+    def test_breakout_idx_indexes_the_callers_own_list(self):
+        """The window is applied internally, so a returned index has to be
+        translated back or it points at the wrong bar.
+        """
+        deep = self._prefixed_bars()
+        result = C.evaluate_conditions(
+            "T", deep, deep, {"sector": None, "sector_strength_pct": None}
+        )
+        idx = result["breakout_idx"]
+        self.assertIsNotNone(idx)
+        self.assertLess(idx, len(deep))
+        # An untranslated index would still be in range but point at the
+        # wrong bar, so anchor it to something externally checkable.
+        self.assertEqual(result["breakout_age_weeks"], len(deep) - 1 - idx)
+        self.assertAlmostEqual(deep[idx]["close"], 46.0, places=6)
+
+    def test_window_is_derived_from_the_internal_lookbacks(self):
+        self.assertGreaterEqual(C.EVALUATION_WEEKS, C.PRE_BASE_LOOKBACK + C.BASE_WINDOW)
+        self.assertGreaterEqual(C.EVALUATION_WEEKS, C.MA_PERIOD + C.MA_SLOPE_LOOKBACK)
+
+
 class StopPlacementTest(unittest.TestCase):
     def test_stop_sits_below_entry_and_is_reported_as_a_percentage(self):
         highs, lows, closes = _series([
