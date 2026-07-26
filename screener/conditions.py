@@ -79,6 +79,31 @@ ACTIONABLE_THRESHOLD = 8
 BASE_WINDOW = 26
 PRE_BASE_LOOKBACK = 52
 
+# How much history an evaluation is allowed to see, enforced inside
+# evaluate_conditions rather than left to whatever each caller happened
+# to fetch.
+#
+# This exists because it was silently broken. Pivot detection scans the
+# entire series it's handed, so the live screener (fetching 104 weeks)
+# and the backtest (fetching weeks-since-start plus a 90-week buffer,
+# nearer 170) could look at the same stock on the same date and find
+# different pivots, hence different resistance, different stops, and a
+# different verdict. Nothing surfaced that — the results just disagreed
+# depending on which entry point you came through.
+#
+# Where the number comes from: the swing rule needs a full pre-base
+# window behind a full base, so PRE_BASE_LOOKBACK + BASE_WINDOW = 78 is
+# the floor for complete geometry. 104 leaves 26 further weeks for price
+# to have moved since the breakout, and comfortably clears the other
+# internal lookbacks (MA_PERIOD + MA_SLOPE_LOOKBACK = 35, and Mansfield
+# RS's 52-period SMA needing 53).
+#
+# Callers may fetch more than this — the backtest has to, since it walks
+# forward through later bars — and the surplus is ignored here. Fetching
+# *less* still degrades the evaluation, so this is a ceiling on what gets
+# looked at, not a guarantee of what's available.
+EVALUATION_WEEKS = 104
+
 # A base wider than this (high-to-low, as a percentage of its high) isn't
 # really a consolidation — it's a wide swing that happens to have a
 # highest point. My own cutoff, not the book's; it's reported rather than
@@ -572,7 +597,22 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
     :return: dict with per-condition results, a conditions_met count, and
         the derived fields (stage, price, MA, RS, swing levels, etc.) that
         run_screener.py writes into screener_results.
+
+    Only the most recent EVALUATION_WEEKS bars are considered, however
+    many are passed in, so that two callers fetching different depths
+    reach the same verdict on the same date. Any index this returns is
+    translated back to the caller's own numbering, so `breakout_idx`
+    still indexes the `bars` list that was handed in.
     """
+    # Trim to the evaluation window before anything reads these. Each
+    # series is trimmed independently: a recently listed ticker may have
+    # fewer bars than the index, and forcing them to a common length here
+    # would quietly shorten the stock's own moving average.
+    bars_offset = max(0, len(bars) - EVALUATION_WEEKS)
+    index_offset = max(0, len(index_bars) - EVALUATION_WEEKS)
+    bars = bars[bars_offset:]
+    index_bars = index_bars[index_offset:]
+
     closes = [b["close"] for b in bars]
     highs = [b["high"] for b in bars]
     lows = [b["low"] for b in bars]
@@ -731,7 +771,15 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
     # Also context rather than a condition: which consolidation the
     # breakout came out of, how long ago, and whether that base was
     # actually tight enough to call it one.
-    conditions_detail["base"] = base
+    #
+    # Bar positions are shifted back into the caller's numbering, since
+    # everything above ran against the trimmed window. Without this,
+    # anything indexing the original list with these would silently read
+    # the wrong bar — the offset is exactly the number of bars dropped.
+    conditions_detail["base"] = dict(base)
+    for key in ("breakout_idx", "base_start", "base_end"):
+        if conditions_detail["base"].get(key) is not None:
+            conditions_detail["base"][key] += bars_offset
     # Persisted alongside the per-condition detail rather than as its own
     # DB column, same pattern as historical_levels — no schema change.
     conditions_detail["scoring"] = scoring
@@ -759,7 +807,8 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         "swing_stop": swing_stop,
         "historical_levels": price_levels,
         "new_52w_high": new_52w_high,
-        "breakout_idx": breakout_idx,
+        # Shifted back into the caller's numbering — see above.
+        "breakout_idx": (breakout_idx + bars_offset) if breakout_idx is not None else None,
         "breakout_age_weeks": base["breakout_age_weeks"],
         "base_is_tight": base["base_is_tight"],
         "base_range_pct": base["base_range_pct"],
