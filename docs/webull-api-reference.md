@@ -44,6 +44,35 @@ Fetched: 2026-07-20
 - Use the official Market Data API and Trading API only. Do not use
   unofficial/reverse-engineered packages.
 
+## Confirmed request limits (2026-07-26)
+All measured against the live API, not read off a page — several
+contradict what I'd assumed.
+
+- **Batch bars take at most 20 symbols per call.** Anything larger is
+  rejected with "symbols size must be between 1 and 20". Fetching one
+  symbol at a time therefore spends 5% of each call's capacity, which
+  is what the screener did until I checked.
+- **Rate limit is 300 requests per 60 seconds**, i.e. 5/sec — half what
+  I had assumed. screener/rate_limit.py throttles against this.
+- **Daily bars cap at count=1200**, so roughly 4.75 years. Requesting
+  more fails with ILLEGAL_PARAMETER. Weekly bars accept at least 600.
+- **The instrument endpoint returns 1,000 records per call** and
+  paginates on last_instrument_id. The full listed universe is 64,358
+  instruments across 65 pages — my first page cap of 40 silently
+  truncated it and made the market look a third smaller than it is.
+- **Instrument metadata distinguishes funds from common stock**: the
+  ETF-specific fields (etf_leveraged_factor, crypto_etf,
+  single_stock_etf) are populated for pooled products and absent for
+  ordinary shares. Filtering on the field beats matching on the name,
+  which misclassifies REITs and other legitimate trusts.
+- **A company's sector arrives as an "industries" list**, broadest entry
+  first — not a "sector" or "industry" field. ETFs carry an empty list,
+  which is legitimate rather than an error.
+- **get_market_sectors returns a bare array**, not an object wrapping a
+  "result" key.
+- **Bars come back newest-first and are split-adjusted** — verified
+  across a 10:1 split, which shows no artificial gap.
+
 ## Script Editor cross-symbol references (2026-07-20)
 - CONFIRMED: Webull's Script Editor (metrix framework) does NOT
   support fetching a second symbol's price data within a
