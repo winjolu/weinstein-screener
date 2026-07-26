@@ -82,6 +82,35 @@ class UniverseCacheTest(_TempDB):
         self.assertEqual(len(db.get_cached_universe()), 1)
 
 
+class ScreenerResultTest(_TempDB):
+    def _row(self, ticker="AAA", run_date="2026-07-26", **overrides):
+        base = {"ticker": ticker, "run_date": run_date, "stage": 2, "conditions_met": 8,
+                "conditions_detail": {"scoring": {"actionable": True}}, "price": 100.0}
+        base.update(overrides)
+        return base
+
+    def test_rerunning_the_same_day_replaces_rather_than_accumulates(self):
+        """Two scans in one day used to leave two rows per ticker, and
+        get_latest_results returned both — double-counting everything
+        downstream.
+        """
+        db.insert_result(self._row(price=100.0))
+        db.insert_result(self._row(price=111.0))
+        rows = db.get_latest_results()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["price"], 111.0)
+
+    def test_separate_days_are_both_kept(self):
+        db.insert_result(self._row(run_date="2026-07-25"))
+        db.insert_result(self._row(run_date="2026-07-26"))
+        self.assertEqual(len(db.get_ticker_history("AAA", 10)), 2)
+
+    def test_distinct_tickers_coexist(self):
+        db.insert_result(self._row(ticker="AAA"))
+        db.insert_result(self._row(ticker="BBB"))
+        self.assertEqual(len(db.get_latest_results()), 2)
+
+
 class BacktestTradeTest(_TempDB):
     def _trade(self, **overrides):
         base = {

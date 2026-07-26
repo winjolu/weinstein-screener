@@ -11,7 +11,7 @@ exposed it.
 import unittest
 
 from screener import conditions as C
-from tests.synthetic import bar, weekly_dates
+from tests.synthetic import bar, trending_bars, weekly_dates
 
 
 def _series(segments):
@@ -242,6 +242,50 @@ class EvaluationWindowTest(unittest.TestCase):
     def test_window_is_derived_from_the_internal_lookbacks(self):
         self.assertGreaterEqual(C.EVALUATION_WEEKS, C.PRE_BASE_LOOKBACK + C.BASE_WINDOW)
         self.assertGreaterEqual(C.EVALUATION_WEEKS, C.MA_PERIOD + C.MA_SLOPE_LOOKBACK)
+
+
+class IndexAlignmentTest(unittest.TestCase):
+    """A stock younger than the index must be judged, not crashed on.
+
+    Pairing the two series by position rather than by date raised
+    outright on any length mismatch, which across a full-market scan
+    discarded 463 recently listed names behind an error that named the
+    symptom and not the cause.
+    """
+
+    def _sector(self):
+        return {"sector": None, "sector_strength_pct": None}
+
+    def test_short_history_ticker_is_evaluated_not_raised(self):
+        index_bars = trending_bars(104, 400.0, 0.5)
+        young = trending_bars(104, 100.0, 0.4)[-30:]   # only 30 weeks listed
+        result = C.evaluate_conditions("NEW", young, index_bars, self._sector())
+        # Too little history for a 52-period relative-strength read, so it
+        # reports unknown rather than inventing one.
+        self.assertIsNone(result["mansfield_rs"])
+        self.assertIn(result["conditions"]["rs_improving"], (None,))
+
+    def test_pairs_on_matching_dates_not_positions(self):
+        """A gap in the stock's own series must not shift it against the
+        index — the pairing has to follow dates.
+        """
+        index_bars = trending_bars(104, 400.0, 0.5)
+        stock = trending_bars(104, 100.0, 0.4)
+        gapped = stock[:50] + stock[55:]   # five weeks missing mid-series
+
+        full = C.evaluate_conditions("T", stock, index_bars, self._sector())
+        holed = C.evaluate_conditions("T", gapped, index_bars, self._sector())
+
+        # Both still produce a reading; positional zipping would have
+        # compared the tail of one against the wrong weeks of the other.
+        self.assertIsNotNone(full["mansfield_rs"])
+        self.assertIsNotNone(holed["mansfield_rs"])
+
+    def test_index_longer_than_stock_does_not_raise(self):
+        index_bars = trending_bars(200, 400.0, 0.5)
+        stock = trending_bars(104, 100.0, 0.4)
+        result = C.evaluate_conditions("T", stock, index_bars, self._sector())
+        self.assertIsNotNone(result["scoring"])
 
 
 class StopPlacementTest(unittest.TestCase):

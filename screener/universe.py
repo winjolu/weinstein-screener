@@ -19,7 +19,13 @@ from webull.data.common.category import Category
 from . import data_fetch, db, rate_limit
 
 INSTRUMENTS_PER_PAGE = 1000
-MAX_PAGES = 40
+
+# The listed universe measured 64,358 instruments — 65 pages. My first
+# guess at this cap was 40, which truncated silently and made me think
+# the universe was 40,000 and the screenable set a third of its real
+# size. Headroom plus a warning now, since quietly screening a fraction
+# of the market is exactly the kind of wrong that looks fine.
+MAX_PAGES = 120
 
 # Exchange codes worth screening. The rest of the listed universe is
 # OTC/pink-sheet (PINL, PK, OTCID, OTCB) where the volume and pivot logic
@@ -43,6 +49,7 @@ def fetch_all_instruments():
     client = data_fetch._get_client()
     out = []
     last_id = None
+    exhausted = False
     for _ in range(MAX_PAGES):
         rate_limit.acquire()
         page = client.instrument.get_instrument(
@@ -52,12 +59,40 @@ def fetch_all_instruments():
             page_size=INSTRUMENTS_PER_PAGE,
         ).json()
         if not isinstance(page, list) or not page:
+            exhausted = True
             break
         out.extend(page)
         last_id = page[-1].get("instrument_id")
         if len(page) < INSTRUMENTS_PER_PAGE:
+            exhausted = True
             break
+
+    if not exhausted:
+        print(
+            f"WARNING: stopped paginating at MAX_PAGES ({MAX_PAGES}) with more "
+            f"instruments still available. The scan is seeing only part of the "
+            f"market — raise MAX_PAGES."
+        )
     return out
+
+
+def is_fund(instrument):
+    """True for ETFs, ETNs and similar pooled products, as opposed to
+    common stock.
+
+    The API doesn't label these directly, but it does carry ETF-specific
+    fields — leverage factor, single-stock flag, crypto flag — and those
+    are populated for pooled products and absent entirely for ordinary
+    shares. Checked across the whole screenable set: 3,338 instruments
+    flagged this way have fund-like names against 16 that don't, so the
+    signal is sound.
+
+    I check the field rather than the name deliberately. Matching on
+    words like "Trust" or "Shares" misclassifies real companies — plenty
+    of REITs are trusts — and that showed up as 343 disagreements where
+    the field is the one telling the truth.
+    """
+    return instrument.get("etf_leveraged_factor") is not None
 
 
 def is_screenable(instrument):
@@ -78,25 +113,38 @@ def is_screenable(instrument):
     return True
 
 
-def get_universe(refresh=False):
+def get_universe(refresh=False, include_funds=False):
     """The screenable universe as a list of symbols, cached for a week.
 
     Listings change slowly, so re-paginating the whole instrument list on
     every run buys nothing.
+
+    Funds are excluded by default. They aren't invalid subjects for stage
+    analysis — the book applies it to sector funds explicitly — but they
+    swamp a stock screen in practice. A first limited run came back
+    almost entirely ETFs, several of them slices of the same sector
+    firing together as if they were independent signals, and none of them
+    carry an industry classification, so condition 5 can never resolve
+    and they're capped below a full verdict. Pass include_funds=True to
+    screen them anyway.
     """
     if not refresh:
         cached = db.get_cached_universe()
         if cached:
-            return [row["symbol"] for row in cached]
+            rows = cached if include_funds else [r for r in cached if not r["is_fund"]]
+            return [row["symbol"] for row in rows]
 
     instruments = fetch_all_instruments()
     screenable = [i for i in instruments if is_screenable(i)]
-    db.cache_universe(screenable)
+    db.cache_universe(screenable, is_fund=is_fund)
+
+    funds = sum(1 for i in screenable if is_fund(i))
     print(
         f"universe: {len(instruments)} instruments -> {len(screenable)} screenable "
-        f"after metadata filter"
+        f"({len(screenable) - funds} stocks, {funds} funds)"
     )
-    return [i["symbol"] for i in screenable if i.get("symbol")]
+    selected = screenable if include_funds else [i for i in screenable if not is_fund(i)]
+    return [i["symbol"] for i in selected if i.get("symbol")]
 
 
 def filter_by_liquidity(bars_by_symbol, min_dollar_volume=MIN_AVG_WEEKLY_DOLLAR_VOLUME, report=True):

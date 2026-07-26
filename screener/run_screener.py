@@ -7,17 +7,26 @@ I add the project root to sys.path so this works whether it's invoked as
 import argparse
 import datetime
 import json
+import math
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from screener import conditions, data_fetch, db, position_sizing, sector_scan, stop_loss
+from screener import (
+    conditions, data_fetch, db, position_sizing, rate_limit, sector_scan,
+    stop_loss, universe,
+)
 
 # Cheap heuristic pointer for run_screener's summary only — not a real
 # evaluation. See conditions.py's module docstring for why the short
 # side isn't just these 9 conditions inverted.
 SHORT_CANDIDATE_MAX_CONDITIONS_MET = 3
+
+# Fetch slightly deeper than the evaluation window: the in-progress week
+# gets dropped on arrival, so asking for exactly the window would leave
+# every evaluation one bar short of it.
+FETCH_WEEKS = conditions.EVALUATION_WEEKS + 2
 
 CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config")
 TICKERS_PATH = os.path.join(CONFIG_DIR, "tickers.json")
@@ -39,11 +48,14 @@ def _load_tickers():
     return data.get("tickers", [])
 
 
-def _process_ticker(ticker, run_date):
-    bars = data_fetch.get_weekly_bars(ticker)
-    index_bars = data_fetch.get_index_bars("SPY")
-    sector_data = data_fetch.get_sector_data(ticker)
+def _evaluate_and_store(ticker, run_date, bars, index_bars, sector_data):
+    """Scores one ticker against already-fetched bars and persists the row.
 
+    Split out from _process_ticker so the universe scan can reuse exactly
+    this logic. That path fetches bars in batches and sector data lazily,
+    so it has nothing to gain from per-ticker fetching — but it must not
+    diverge on how a result is scored, sized, or stored.
+    """
     result = conditions.evaluate_conditions(ticker, bars, index_bars, sector_data)
 
     # Stop-loss/entry-plan are only meaningful once a ticker actually
@@ -103,6 +115,39 @@ def _process_ticker(ticker, run_date):
     return row
 
 
+def _process_ticker(ticker, run_date, index_bars):
+    bars = data_fetch.get_weekly_bars(ticker, lookback_weeks=FETCH_WEEKS)
+    sector_data = data_fetch.get_sector_data(ticker)
+    return _evaluate_and_store(ticker, run_date, bars, index_bars, sector_data)
+
+
+def _could_still_qualify(result):
+    """Whether a ticker scored *without* sector data could still become
+    actionable once that sector lookup happens.
+
+    This is what makes a full-market scan affordable. The sector lookup
+    is the one genuinely per-ticker API call left, so it's worth spending
+    only on names that could actually clear the bar. Everything else in
+    the checklist is computable from bars alone.
+
+    The test is exact rather than a heuristic, so it can't discard a real
+    candidate: assume the pending sector condition resolves in the
+    ticker's favour and ask whether that would be enough. Nothing else is
+    assumed — the other unknowns stay unknown, because they're unresolved
+    for reasons the chart won't change (no breakout to measure, not in a
+    pullback), not for want of another API call.
+    """
+    scoring = result["scoring"]
+    if scoring["blocking"]:
+        return False
+
+    best_met = scoring["met"] + 1
+    best_resolved = scoring["resolved"] + 1
+    if best_resolved < conditions.MIN_RESOLVED_CONDITIONS:
+        return False
+    return best_met >= math.ceil(conditions.ACTIONABLE_SCORE * best_resolved)
+
+
 def _looks_like_short_candidate(row):
     """Cheap heuristic pointer only, not a real evaluation — flags
     tickers scoring low on the long checklist while already in Stage 3/4
@@ -120,6 +165,86 @@ def _looks_like_short_candidate(row):
     return negative_rs or declining_rs
 
 
+def _process_universe(run_date, index_bars, limit=None, min_dollar_volume=None,
+                       include_funds=False):
+    """Screens the whole tradable universe rather than a list I wrote.
+
+    Shaped as a funnel because the costs are wildly uneven. Discovery and
+    metadata filtering are nearly free, bars are cheap in batches of
+    twenty, and the sector lookup is the only real per-ticker expense —
+    so it goes last, applied to the few hundred names that could still
+    qualify rather than the few thousand that can't.
+    """
+    symbols = universe.get_universe(include_funds=include_funds)
+    if limit:
+        symbols = symbols[:limit]
+        print(f"--limit: screening the first {len(symbols)} symbols only")
+
+    print(f"fetching weekly bars for {len(symbols)} symbols "
+          f"({(len(symbols) + data_fetch.MAX_SYMBOLS_PER_BATCH - 1) // data_fetch.MAX_SYMBOLS_PER_BATCH} batched calls)...")
+    bars_by_symbol = data_fetch.get_weekly_bars_batch(symbols, lookback_weeks=FETCH_WEEKS)
+    print(f"  got bars for {len(bars_by_symbol)} of {len(symbols)}")
+
+    kwargs = {"report": True}
+    if min_dollar_volume is not None:
+        kwargs["min_dollar_volume"] = min_dollar_volume
+    bars_by_symbol = universe.filter_by_liquidity(bars_by_symbol, **kwargs)
+
+    # Score everything on bars alone. No API calls here, so it's cheap to
+    # run across the whole survivor set and lets the sector spend be
+    # aimed precisely.
+    candidates = []
+    near_misses = []
+    for symbol, bars in bars_by_symbol.items():
+        try:
+            provisional = conditions.evaluate_conditions(symbol, bars, index_bars, None)
+        except Exception as exc:
+            print(f"[{symbol}] skipped during prefilter — {exc}")
+            continue
+        if _could_still_qualify(provisional):
+            candidates.append((symbol, bars))
+        elif not provisional["scoring"]["blocking"]:
+            near_misses.append((symbol, provisional))
+
+    print(f"prefilter: {len(candidates)} could still qualify, "
+          f"{len(near_misses)} scored but can't reach the bar")
+
+    rows = []
+    for i, (symbol, bars) in enumerate(candidates, 1):
+        try:
+            sector_data = data_fetch.get_sector_data(symbol)
+            rows.append(_evaluate_and_store(symbol, run_date, bars, index_bars, sector_data))
+        except Exception as exc:
+            print(f"[{symbol}] skipped — {exc}")
+        if i % 25 == 0:
+            used, cap = rate_limit.snapshot()
+            print(f"  evaluated {i}/{len(candidates)} (rate budget {used}/{cap})")
+
+    _print_near_misses(near_misses)
+    return rows
+
+
+def _print_near_misses(near_misses, top=10):
+    """Names that scored cleanly but can't reach actionable — the
+    monitoring list. Reported from the sector-less pass, so it costs
+    nothing beyond bars already fetched.
+    """
+    if not near_misses:
+        return
+    ranked = sorted(
+        near_misses,
+        key=lambda pair: (pair[1]["scoring"]["met"], -pair[1]["scoring"]["failed"]),
+        reverse=True,
+    )[:top]
+    print()
+    print(f"closest non-qualifying ({len(near_misses)} total, showing {len(ranked)}) — "
+          "scored without sector data, so not directly comparable to the table above:")
+    for symbol, result in ranked:
+        s = result["scoring"]
+        stage = result["stage"] if result["stage"] is not None else "?"
+        print(f"  {symbol:<8} stage {stage}  {s['met']} met / {s['failed']} failed / {s['unknown']} unknown")
+
+
 def _needs_manual_review(conditions_detail):
     # pullback_quality/risk_reward only need a human look when they came
     # back genuinely ambiguous (None). resistance_breakout always does,
@@ -134,10 +259,45 @@ def _needs_manual_review(conditions_detail):
     return ambiguous_review or always_review
 
 
-def _print_summary(rows):
+def _rank_key(row):
+    """Ordering for the summary, most worth looking at first.
+
+    A watchlist of twenty came out in whatever order it was written and
+    that was fine. A full-market scan surfaced 225 actionable names,
+    which is a list nobody works through — so the ordering has to carry
+    real information.
+
+    Priorities, in order: setups that qualify; then ones still entryable
+    rather than already extended past the breakout, since the book is
+    explicit about not chasing; then a strong sector, which is Weinstein's
+    own top-down sequence and the reason sector rank is worth keeping
+    even once the universe is screened directly; then the proportion of
+    resolved conditions met; then the freshest breakout.
+    """
+    scoring = row["scoring"]
+    plan = row.get("entry_plan") or {}
+    detail = row["conditions_detail"].get("sector_strength", {})
+    percentile = detail.get("sector_strength_percentile")
+    age = row.get("breakout_age_weeks")
+    return (
+        0 if scoring["actionable"] else 1,
+        1 if plan.get("extended") else 0,
+        -(percentile if percentile is not None else -1),
+        -(scoring["score"] or 0),
+        age if age is not None else 10_000,
+    )
+
+
+def _print_summary(rows, detail_limit=25):
     if not rows:
         print("No results.")
         return
+
+    rows = sorted(rows, key=_rank_key)
+    actionable_total = sum(1 for r in rows if r["scoring"]["actionable"])
+    if actionable_total > detail_limit:
+        print(f"{actionable_total} names qualify — showing full detail for the top "
+              f"{detail_limit} by sector strength and entry quality.\n")
 
     header = (
         f"{'TICKER':<8}{'STAGE':<7}{'MET':<5}{'FAIL':<6}{'UNK':<5}"
@@ -145,9 +305,15 @@ def _print_summary(rows):
     )
     print(header)
     print("-" * len(header))
+    shown = 0
     for row in rows:
         scoring = row["scoring"]
         is_actionable = scoring["actionable"]
+        # Every row still gets a line; only the supporting detail is
+        # capped, so nothing disappears silently from the scan.
+        verbose = is_actionable and shown < detail_limit
+        if verbose:
+            shown += 1
         actionable = "yes" if is_actionable else "no"
         review = "review" if _needs_manual_review(row["conditions_detail"]) else ""
         stage = row["stage"] if row["stage"] is not None else "?"
@@ -161,14 +327,21 @@ def _print_summary(rows):
         if not is_actionable and (scoring["blocking"] or scoring["resolved"] < conditions.MIN_RESOLVED_CONDITIONS):
             print(f"    {scoring['reason']}")
 
-        if is_actionable:
+        if verbose:
             stop = row.get("stop_loss")
-            if stop:
+            if stop and stop.get("recommended") is not None:
                 print(
-                    f"    stop-loss ({stop['method']} recommended): "
-                    f"ma={stop['ma_stop']} swing_low={stop['swing_low_stop']} "
-                    f"-> {stop['recommended']}"
+                    f"    trailing stop ({stop['method']}): {stop['recommended']:.2f}"
                 )
+            elif stop:
+                # Both methods can legitimately come back empty on a fresh
+                # breakout: the MA stop waits for price to clear the average
+                # by a margin, and a swing-low stop needs a confirmed pivot
+                # since entry. Say so rather than printing "None", and fall
+                # back to the initial stop, which is what's actually in force.
+                initial = row.get("swing_stop")
+                fallback = f", use the initial stop at {initial:.2f}" if initial else ""
+                print(f"    trailing stop: not established yet{fallback}")
             age = row.get("breakout_age_weeks")
             if age is not None:
                 tight = row.get("base_is_tight")
@@ -200,6 +373,27 @@ def _parse_args():
         "--top-n", type=int, default=3,
         help="Number of top-ranked sectors to pull into a --broad scan (default 3).",
     )
+    parser.add_argument(
+        "--universe", action="store_true",
+        help="Screen every tradable listing rather than a curated list. This is "
+             "the only mode that can surface a stock I didn't already know to look at.",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None,
+        help="Cap how many symbols a --universe scan looks at. For trying things "
+             "out without spending a full pass.",
+    )
+    parser.add_argument(
+        "--min-dollar-volume", type=float, default=None,
+        help="Override the liquidity floor for a --universe scan, in dollars of "
+             "average weekly turnover.",
+    )
+    parser.add_argument(
+        "--include-funds", action="store_true",
+        help="Also screen ETFs and similar pooled products, which a --universe "
+             "scan skips by default because they crowd out individual stocks and "
+             "carry no sector classification.",
+    )
     return parser.parse_args()
 
 
@@ -207,23 +401,36 @@ def main():
     args = _parse_args()
     run_date = datetime.date.today().isoformat()
 
-    if args.broad:
-        tickers = sector_scan.build_watchlist_from_top_sectors(n=args.top_n)
-        print(f"--broad: built a {len(tickers)}-ticker watchlist from the top {args.top_n} sectors.")
-    else:
-        tickers = _load_tickers()
-
     db.init_db()
-    db.seed_watchlist_from_config(tickers, run_date)
 
-    summary_rows = []
-    for ticker in tickers:
-        try:
-            row = _process_ticker(ticker, run_date)
-            summary_rows.append(row)
-        except Exception as exc:
-            print(f"[{ticker}] skipped — {exc}")
+    # One index fetch for the whole run. This used to happen once per
+    # ticker, which was invisible on a 20-name watchlist and would have
+    # been thousands of redundant calls across a universe scan.
+    index_bars = data_fetch.get_index_bars("SPY", lookback_weeks=FETCH_WEEKS)
 
+    if args.universe:
+        summary_rows = _process_universe(
+            run_date, index_bars, limit=args.limit,
+            min_dollar_volume=args.min_dollar_volume,
+            include_funds=args.include_funds,
+        )
+    else:
+        if args.broad:
+            tickers = sector_scan.build_watchlist_from_top_sectors(n=args.top_n)
+            print(f"--broad: built a {len(tickers)}-ticker watchlist from the top {args.top_n} sectors.")
+        else:
+            tickers = _load_tickers()
+
+        db.seed_watchlist_from_config(tickers, run_date)
+
+        summary_rows = []
+        for ticker in tickers:
+            try:
+                summary_rows.append(_process_ticker(ticker, run_date, index_bars))
+            except Exception as exc:
+                print(f"[{ticker}] skipped — {exc}")
+
+    print()
     _print_summary(summary_rows)
 
 
