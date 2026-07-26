@@ -1,0 +1,109 @@
+"""Data-layer regressions.
+
+The partial-week case is here because it was the bug that invalidated
+this project's only "actionable" signal to date: a still-forming weekly
+bar carries a fraction of a full week's volume, which read as healthy
+pullback contraction (0.81x) when the completed week was actually
+volume expansion (1.44x). Nothing looked wrong in the output.
+
+The batch unpacker is here because it is new, has a silent failure mode
+(a symbol that quietly vanishes from a batch of 20 rather than raising),
+and had never been exercised when these tests were written.
+"""
+import datetime
+import unittest
+
+from screener import data_fetch
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def _raw(symbol, dates):
+    """Mimics the API's own shape: newest bar first, numbers as strings."""
+    return {
+        "symbol": symbol,
+        "result": [
+            {"time": f"{d}T04:00:00.000+0000", "open": "1", "high": "2",
+             "low": "0.5", "close": "1.5", "volume": "1000"}
+            for d in reversed(dates)
+        ],
+    }
+
+
+class PartialWeekTest(unittest.TestCase):
+    def test_current_week_on_a_weekday_is_partial(self):
+        wednesday = datetime.date(2026, 7, 22)
+        self.assertTrue(data_fetch._is_partial_week("2026-07-21", today=wednesday))
+
+    def test_prior_week_is_complete(self):
+        wednesday = datetime.date(2026, 7, 22)
+        self.assertFalse(data_fetch._is_partial_week("2026-07-17", today=wednesday))
+
+    def test_weekend_treats_the_just_ended_week_as_complete(self):
+        """A Friday bar shares its ISO week with the Saturday that follows.
+        Without this carve-out a weekend review would always throw away
+        the most recent completed week.
+        """
+        saturday = datetime.date(2026, 7, 25)
+        self.assertEqual(saturday.isocalendar()[:2],
+                         datetime.date(2026, 7, 24).isocalendar()[:2])
+        self.assertFalse(data_fetch._is_partial_week("2026-07-24", today=saturday))
+
+    def test_drop_partial_week_removes_only_the_last_bar(self):
+        bars = [{"time": "2026-07-17T04:00:00.000+0000"},
+                {"time": "2026-07-24T04:00:00.000+0000"}]
+        original = list(bars)
+        kept = data_fetch._drop_partial_week(bars, include_partial_week=True)
+        self.assertEqual(kept, original)
+
+    def test_empty_input_is_safe(self):
+        self.assertEqual(data_fetch._drop_partial_week([], False), [])
+
+
+class BatchUnpackTest(unittest.TestCase):
+    def test_unpacks_every_symbol_oldest_first(self):
+        response = _FakeResponse({"result": [
+            _raw("AAA", ["2026-07-10", "2026-07-17"]),
+            _raw("BBB", ["2026-07-10", "2026-07-17"]),
+        ]})
+        out = data_fetch._bars_from_batch_response(response)
+        self.assertEqual(set(out), {"AAA", "BBB"})
+        self.assertEqual(out["AAA"][0]["time"][:10], "2026-07-10")
+        self.assertEqual(out["AAA"][-1]["time"][:10], "2026-07-17")
+
+    def test_one_empty_symbol_does_not_discard_the_batch(self):
+        """The single-symbol unpacker raises on empty, which is right when
+        one thing was asked for and wrong for a batch of twenty.
+        """
+        response = _FakeResponse({"result": [
+            _raw("GOOD", ["2026-07-17"]),
+            {"symbol": "DEAD", "result": []},
+        ]})
+        out = data_fetch._bars_from_batch_response(response)
+        self.assertIn("GOOD", out)
+        self.assertNotIn("DEAD", out)
+
+    def test_accepts_a_bare_array_payload(self):
+        response = _FakeResponse([_raw("AAA", ["2026-07-17"])])
+        self.assertIn("AAA", data_fetch._bars_from_batch_response(response))
+
+    def test_parses_numeric_strings(self):
+        out = data_fetch._bars_from_batch_response(
+            _FakeResponse({"result": [_raw("AAA", ["2026-07-17"])]})
+        )
+        bar = out["AAA"][0]
+        for field in ("open", "high", "low", "close", "volume"):
+            self.assertIsInstance(bar[field], float)
+
+    def test_batch_cap_matches_the_server_limit(self):
+        self.assertEqual(data_fetch.MAX_SYMBOLS_PER_BATCH, 20)
+
+
+if __name__ == "__main__":
+    unittest.main()
