@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS universe_cache (
     name TEXT,
     exchange_code TEXT,
     status TEXT,
+    is_fund BOOLEAN NOT NULL DEFAULT 0,
     fetched_date TEXT NOT NULL
 );
 
@@ -100,6 +101,26 @@ BACKTEST_TRADE_COLUMNS = [
 # at a different file — which the tests do — still gets its schema.
 _schema_ready_for = None
 
+# Cache tables get rebuilt rather than migrated when their shape changes.
+# They hold nothing that can't be re-fetched, so dropping is cheaper and
+# far less error-prone than an ALTER path that has to know every previous
+# version of the table. Anything holding real history — screener_results,
+# backtest_trades — is deliberately absent from this list and would need
+# a proper migration.
+_REBUILDABLE_CACHE_COLUMNS = {
+    "universe_cache": {"symbol", "name", "exchange_code", "status", "is_fund", "fetched_date"},
+    "sector_cache": {"ticker", "sector", "fetched_date"},
+}
+
+
+def _rebuild_stale_cache_tables(conn):
+    for table, expected in _REBUILDABLE_CACHE_COLUMNS.items():
+        existing = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        if not existing:
+            continue  # first run; CREATE TABLE will handle it
+        if {row[1] for row in existing} != expected:
+            conn.execute(f"DROP TABLE {table}")
+
 
 def _connect():
     """Opens a connection, ensuring the schema exists first.
@@ -116,6 +137,7 @@ def _connect():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     if _schema_ready_for != DB_PATH:
+        _rebuild_stale_cache_tables(conn)
         conn.executescript(SCHEMA)
         conn.commit()
         _schema_ready_for = DB_PATH
@@ -163,6 +185,15 @@ def insert_result(result):
 
     conn = _connect()
     try:
+        # One row per ticker per run date. Re-running a scan the same day
+        # used to append rather than replace, so a second pass left two
+        # rows for every ticker and get_latest_results returned both —
+        # measured at 651 rows across 334 tickers, which would silently
+        # double-count in anything reading the history back.
+        conn.execute(
+            "DELETE FROM screener_results WHERE ticker = ? AND run_date = ?",
+            (row.get("ticker"), row.get("run_date")),
+        )
         columns = [c for c in RESULT_COLUMNS if c in row]
         placeholders = ", ".join("?" for _ in columns)
         conn.execute(
@@ -264,19 +295,25 @@ def get_cached_universe():
     return [dict(r) for r in rows]
 
 
-def cache_universe(instruments):
+def cache_universe(instruments, is_fund=None):
     """Replaces the cached universe wholesale — a partial refresh would
     leave delisted names behind.
+
+    :param is_fund: optional predicate marking pooled products, so a scan
+        can exclude them without re-deriving the classification from the
+        raw instrument records it no longer has.
     """
     today = datetime.date.today().isoformat()
     conn = _connect()
     try:
         conn.execute("DELETE FROM universe_cache")
         conn.executemany(
-            "INSERT OR REPLACE INTO universe_cache (symbol, name, exchange_code, status, fetched_date) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO universe_cache "
+            "(symbol, name, exchange_code, status, is_fund, fetched_date) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             [
-                (i.get("symbol"), i.get("name"), i.get("exchange_code"), i.get("status"), today)
+                (i.get("symbol"), i.get("name"), i.get("exchange_code"), i.get("status"),
+                 bool(is_fund(i)) if is_fund else False, today)
                 for i in instruments
                 if i.get("symbol")
             ],

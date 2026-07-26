@@ -668,9 +668,28 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
     )
 
     # Condition 4: Mansfield RS improving or positive.
-    mrs_series, rs_ma_rising = mansfield_rs.compute_mansfield_rs(closes, idx_closes)
-    mrs_now = mrs_series[latest_idx]
-    mrs_prior = mrs_series[latest_idx - MA_SLOPE_LOOKBACK] if latest_idx >= MA_SLOPE_LOOKBACK else None
+    # Pair the two series by date rather than by position. Zipping by
+    # position quietly compares mismatched weeks whenever the series
+    # differ in length, and raises outright when the stock is younger
+    # than the index — which across a full-market scan discarded 463
+    # recently listed names behind an error message that said nothing
+    # about the actual cause. A young stock should come back as "not
+    # enough history to judge", not as a crash.
+    index_by_date = {b["time"][:10]: b["close"] for b in index_bars}
+    paired = [
+        (b["close"], index_by_date[b["time"][:10]])
+        for b in bars
+        if b["time"][:10] in index_by_date
+    ]
+    mrs_series, rs_ma_rising = mansfield_rs.compute_mansfield_rs(
+        [c for c, _ in paired], [i for _, i in paired]
+    )
+    # Indexed from the end, since the paired series is shorter than the
+    # ticker's own bars whenever some weeks had no matching index bar.
+    mrs_now = mrs_series[-1] if mrs_series else None
+    mrs_prior = (
+        mrs_series[-1 - MA_SLOPE_LOOKBACK] if len(mrs_series) > MA_SLOPE_LOOKBACK else None
+    )
     rs_improving = None if mrs_now is None or mrs_prior is None else mrs_now > mrs_prior
     if mrs_now is None:
         rs_condition = None
