@@ -1,3 +1,6 @@
+See also docs/parameter-calibration.md for decisions about the
+screener's numeric thresholds and what evidence each one rests on.
+
 # Database Choice: SQLite (not hosted Postgres/Supabase)
 
 ## Decision
