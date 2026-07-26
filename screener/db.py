@@ -3,6 +3,7 @@
 I keep the database at data/screener.db, which is already gitignored via
 data/* — nothing here ever needs to touch git.
 """
+import datetime
 import json
 import os
 import sqlite3
@@ -43,6 +44,25 @@ CREATE TABLE IF NOT EXISTS tickers_watchlist (
     active BOOLEAN NOT NULL DEFAULT 1
 );
 
+-- A company's sector classification effectively never changes, so this
+-- is cached across runs rather than re-fetched per ticker per scan. That
+-- one call per ticker dominates the API budget once the universe is wide.
+CREATE TABLE IF NOT EXISTS sector_cache (
+    ticker TEXT PRIMARY KEY,
+    sector TEXT,
+    fetched_date TEXT NOT NULL
+);
+
+-- The tradable-instrument universe, refreshed on a TTL. Listings change
+-- slowly, so re-paginating 20k instruments on every run is wasteful.
+CREATE TABLE IF NOT EXISTS universe_cache (
+    symbol TEXT PRIMARY KEY,
+    name TEXT,
+    exchange_code TEXT,
+    status TEXT,
+    fetched_date TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS backtest_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker TEXT NOT NULL,
@@ -75,9 +95,31 @@ BACKTEST_TRADE_COLUMNS = [
 ]
 
 
+# Which DB path the schema has already been applied to in this process.
+# Keyed on the path rather than a plain boolean so that pointing DB_PATH
+# at a different file — which the tests do — still gets its schema.
+_schema_ready_for = None
+
+
 def _connect():
+    """Opens a connection, ensuring the schema exists first.
+
+    Callers used to have to remember init_db() before touching anything,
+    which was fine while the only readers were the screener's own entry
+    points and became a trap as soon as data_fetch started consulting the
+    sector cache: a missing table surfaces as an opaque OperationalError
+    from somewhere unrelated. CREATE TABLE IF NOT EXISTS is cheap and
+    idempotent, so there's no reason to make correctness depend on call
+    ordering.
+    """
+    global _schema_ready_for
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    return sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
+    if _schema_ready_for != DB_PATH:
+        conn.executescript(SCHEMA)
+        conn.commit()
+        _schema_ready_for = DB_PATH
+    return conn
 
 
 def init_db():
@@ -159,6 +201,87 @@ def get_ticker_history(ticker, weeks_back):
             (ticker, weeks_back),
         ).fetchall()
         return [dict(r) for r in reversed(rows)]
+    finally:
+        conn.close()
+
+
+SECTOR_CACHE_TTL_DAYS = 90
+UNIVERSE_CACHE_TTL_DAYS = 7
+
+
+def _is_fresh(fetched_date, ttl_days):
+    try:
+        age = (datetime.date.today() - datetime.date.fromisoformat(fetched_date)).days
+    except (TypeError, ValueError):
+        return False
+    return age < ttl_days
+
+
+def get_cached_sector(ticker):
+    """Returns {"sector": ...} if a fresh cached classification exists,
+    else None. A None sector is itself a valid cached answer — ETFs
+    genuinely have no industry — so absence has to be distinguished from
+    a cached null, which is why this returns a dict rather than the bare
+    value.
+    """
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT sector, fetched_date FROM sector_cache WHERE ticker = ?", (ticker,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None or not _is_fresh(row["fetched_date"], SECTOR_CACHE_TTL_DAYS):
+        return None
+    return {"sector": row["sector"]}
+
+
+def cache_sector(ticker, sector):
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO sector_cache (ticker, sector, fetched_date) VALUES (?, ?, ?)",
+            (ticker, sector, datetime.date.today().isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_cached_universe():
+    """The cached tradable universe, or None when absent or stale."""
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute("SELECT * FROM universe_cache ORDER BY symbol").fetchall()
+    finally:
+        conn.close()
+
+    if not rows or not _is_fresh(rows[0]["fetched_date"], UNIVERSE_CACHE_TTL_DAYS):
+        return None
+    return [dict(r) for r in rows]
+
+
+def cache_universe(instruments):
+    """Replaces the cached universe wholesale — a partial refresh would
+    leave delisted names behind.
+    """
+    today = datetime.date.today().isoformat()
+    conn = _connect()
+    try:
+        conn.execute("DELETE FROM universe_cache")
+        conn.executemany(
+            "INSERT OR REPLACE INTO universe_cache (symbol, name, exchange_code, status, fetched_date) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [
+                (i.get("symbol"), i.get("name"), i.get("exchange_code"), i.get("status"), today)
+                for i in instruments
+                if i.get("symbol")
+            ],
+        )
+        conn.commit()
     finally:
         conn.close()
 
