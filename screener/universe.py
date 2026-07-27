@@ -36,12 +36,29 @@ MAJOR_EXCHANGES = {"NYSE", "NAS", "NSQ", "NMS", "PSE", "ASE", "BATS", "ARCA", "A
 # which isn't screenable.
 TRADABLE_STATUS = "OC"
 
-# Minimum average weekly dollar volume. Weinstein's volume rules assume a
-# liquid, institutionally-traded stock, and thin names also break the
-# pivot logic. I'm deliberately leaving this at a permissive default
-# rather than guessing a "right" number — see filter_by_liquidity, which
-# reports the distribution so it can be set from real data.
-MIN_AVG_WEEKLY_DOLLAR_VOLUME = 5_000_000
+# Minimum average weekly dollar volume, set at the point where the data
+# itself degrades rather than at a guess about tradability.
+#
+# I originally invented $5M. Measured across the universe, that was
+# excluding 2,286 names, 163 of which would otherwise have reached the
+# prefilter — and it wasn't buying signal quality, because the rate at
+# which names reach the prefilter is essentially flat across every
+# liquidity band: 7.3% under $1M, 7.0% at $1-5M, 6.0% at $5-15M, 8.7%
+# above $200M. A filter that removes a uniform slice of candidates isn't
+# filtering, it's just shrinking the search.
+#
+# What does change with liquidity is data integrity, and it breaks
+# sharply below $1M: 8.9% of those names carry a zero-volume week
+# against 2.8% just above, 34.6% have truncated history against 21.5%,
+# and 30% can't be assigned a stage at all. Above $1M the degradation is
+# smooth with no natural cutoff, so anything higher would be preference
+# dressed as a threshold.
+#
+# Note this is a data-quality floor, not a capacity one. $1M a week is
+# roughly $200k a day, which is thin for a position of any size — raise
+# it with --min-dollar-volume if the trade size warrants, since that's a
+# judgement about the account rather than about the data.
+MIN_AVG_WEEKLY_DOLLAR_VOLUME = 1_000_000
 
 
 def fetch_all_instruments():
