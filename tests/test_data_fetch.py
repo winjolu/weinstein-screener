@@ -107,3 +107,54 @@ class BatchUnpackTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BatchSplitsAroundBadSymbolsTest(unittest.TestCase):
+    """A single unrecognised ticker makes the server reject the whole
+    request, so a batch of twenty used to die for one bad name — 100
+    symbols lost across a full sweep, indistinguishable downstream from
+    tickers that simply didn't qualify.
+    """
+
+    class _FakeMarketData:
+        def __init__(self, bad):
+            self.bad = bad
+            self.calls = []
+
+        def get_batch_history_bar(self, symbols, category, timespan, count):
+            self.calls.append(list(symbols))
+            offenders = [s for s in symbols if s in self.bad]
+            if offenders:
+                raise RuntimeError(f"INVALID_SYMBOL {offenders}")
+            return _FakeResponse([
+                {"symbol": s, "result": [
+                    {"time": "2026-01-02T04:00:00.000+0000", "open": 1, "high": 1,
+                     "low": 1, "close": 1, "volume": 1}
+                ]}
+                for s in symbols
+            ])
+
+    class _FakeClient:
+        def __init__(self, market_data):
+            self.market_data = market_data
+
+    def test_good_symbols_survive_a_poisoned_batch(self):
+        good = [f"OK{i}" for i in range(19)]
+        md = self._FakeMarketData(bad={"BAD"})
+        out = {}
+        data_fetch._fetch_chunk(self._FakeClient(md), good + ["BAD"], 104, True, out)
+        self.assertEqual(sorted(out), sorted(good))
+        self.assertNotIn("BAD", out)
+
+    def test_isolating_one_offender_is_cheaper_than_retrying_each(self):
+        md = self._FakeMarketData(bad={"BAD"})
+        out = {}
+        chunk = [f"OK{i}" for i in range(19)] + ["BAD"]
+        data_fetch._fetch_chunk(self._FakeClient(md), chunk, 104, True, out)
+        self.assertLess(len(md.calls), len(chunk))
+
+    def test_an_all_bad_batch_drops_everything_without_raising(self):
+        md = self._FakeMarketData(bad={"A", "B"})
+        out = {}
+        data_fetch._fetch_chunk(self._FakeClient(md), ["A", "B"], 104, True, out)
+        self.assertEqual(out, {})

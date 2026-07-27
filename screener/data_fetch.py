@@ -96,18 +96,42 @@ def get_weekly_bars_batch(tickers, lookback_weeks=104, include_partial_week=Fals
     out = {}
     for i in range(0, len(tickers), MAX_SYMBOLS_PER_BATCH):
         chunk = list(tickers[i:i + MAX_SYMBOLS_PER_BATCH])
-        rate_limit.acquire()
-        try:
-            response = client.market_data.get_batch_history_bar(
-                chunk, Category.US_STOCK.name, Timespan.W.name, count=str(lookback_weeks)
-            )
-        except Exception as exc:
-            # One bad chunk shouldn't end a market-wide sweep.
-            print(f"[batch {i//MAX_SYMBOLS_PER_BATCH}] {len(chunk)} symbols skipped — {exc}")
-            continue
-        for symbol, bars in _bars_from_batch_response(response).items():
-            out[symbol] = _drop_partial_week(bars, include_partial_week)
+        _fetch_chunk(client, chunk, lookback_weeks, include_partial_week, out)
     return out
+
+
+def _fetch_chunk(client, chunk, lookback_weeks, include_partial_week, out):
+    """Fetches one batch, splitting it if the API rejects the whole call.
+
+    A single delisted or unrecognised ticker makes the server reject the
+    entire request with INVALID_SYMBOL, so a batch of twenty dies for one
+    bad name. Across a full sweep that silently cost 100 symbols in five
+    batches — the same failure mode as any other silent exclusion, since
+    nothing downstream can tell a dropped ticker from one that simply
+    didn't qualify.
+
+    Halving on failure isolates the offender in a handful of extra calls
+    rather than the twenty a per-symbol retry would need, and it doesn't
+    depend on parsing symbol names out of an error message.
+    """
+    if not chunk:
+        return
+    rate_limit.acquire()
+    try:
+        response = client.market_data.get_batch_history_bar(
+            chunk, Category.US_STOCK.name, Timespan.W.name, count=str(lookback_weeks)
+        )
+    except Exception as exc:
+        if len(chunk) == 1:
+            print(f"[{chunk[0]}] no bars — {str(exc)[:90]}")
+            return
+        mid = len(chunk) // 2
+        _fetch_chunk(client, chunk[:mid], lookback_weeks, include_partial_week, out)
+        _fetch_chunk(client, chunk[mid:], lookback_weeks, include_partial_week, out)
+        return
+
+    for symbol, bars in _bars_from_batch_response(response).items():
+        out[symbol] = _drop_partial_week(bars, include_partial_week)
 
 
 def _bars_from_response(response, symbol):
