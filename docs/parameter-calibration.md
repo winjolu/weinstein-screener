@@ -52,6 +52,88 @@ at which wide-stop-setup edge can actually be estimated. The trigger is
 sample size, not a tidier architecture — this round rejected an
 architectural argument that the data did not support.
 
+## Why I didn't retune the stop ceiling when the data arrived (2026-07-27)
+
+The decision above anticipated re-opening this once a real dataset
+existed. One does now — 6,782 stocks — and it says the ceiling rejects
+84% of setups among names trading over $25M a week, i.e. it is the
+binding constraint on almost everything liquid enough to actually trade.
+
+That looks like a clear case for raising it. It isn't, and the reason is
+worth recording so I don't talk myself into it later.
+
+I tested the two mechanical explanations for why my stops sit around 22%
+when the book's worked examples risk 5-6%, and both came back negative:
+
+- **The lookback window isn't it.** Shrinking the pre-breakout window
+  from 8 weeks to 2 only moves the median from 24.5% to 15.0%, still
+  triple the book, and at that length the stop hugs price closely enough
+  to be triggered by noise.
+- **The entry basis isn't it.** I enter at the breakout week's close
+  rather than at the breakout level a resting buy-stop would fill at,
+  but breakout weeks close a median of only 2.5% above their own level.
+  Worth 2.6 points of the gap, not 17. (The level is touched during the
+  breakout week 98% of the time, so buy-stop entry is at least a
+  realistic model.)
+
+What's left is that my placement rule and the book's are different rules.
+Mine puts the stop at the low of the recent consolidation. Re-reading the
+worked examples — buy at 20 3/8 with the stop at 19 1/8, or bought above
+resistance at 38 with the stop under the round number of 36 — those are
+the nearest meaningful chart level *below entry*, not the bottom of the
+range. I confirmed both ends of the spectrum on real data: the range low
+gives roughly 22%, tucking under the breakout level itself gives 1-2%.
+The book's practice sits between them and I implement neither.
+
+So the ceiling isn't the broken part. Retuning it would fit a number to a
+distribution produced by a rule I've just established doesn't match the
+method, and there's no natural breakpoint to fit to in any case — 17.5%
+at the first quartile, 24.5% at the median, smooth throughout.
+
+### Then I tried the rework, and it was worse
+
+I rebuilt stop placement to pick the *nearest* meaningful level below
+entry — minor swing lows, the cleared resistance, the nearest round
+number — rather than the lowest low of a window. It produced a median
+stop of 5.5%, almost exactly the book's figure. I nearly committed it.
+
+It was wrong, and the giveaway was the spread rather than the middle. The
+old rule ran 17.5% to 35.8% across the quartiles; the rework ran 4.6% to
+6.6%. A stop derived from real support should vary a great deal between
+stocks, and one that barely varies is being set by a constant. It was:
+the nearest round number below the minimum-distance ceiling is always
+within one step of that ceiling, so it won 84% of the time and the
+minimum distance was setting every stop. Chart structure won 1% of the
+time. Condition 9 flipped from failing 84% to passing 90%, which is
+equally uninformative in the opposite direction.
+
+The lesson, which I have now learned twice on this same function: when a
+calibration change makes a distribution collapse rather than shift, the
+parameter is talking, not the market.
+
+### Why the book's percentages don't transfer
+
+The thing that actually settles it is weekly noise. Across 320,771
+stock-weeks on liquid names, the median weekly dip below the prior close
+is 3.1% and the 75th percentile is 6.3%. A 5% stop therefore sits between
+the median and p75 of a *single week's ordinary movement* — it gets
+tagged in 33% of weeks, against 2% for a 22% stop. Nothing about position
+sizing rescues that: a tight stop buys a 4.4x larger position for the
+same dollar risk, but it's being hit by Tuesday rather than by the thesis
+failing, and this system's whole premise is holding through a multi-month
+advance.
+
+So Weinstein's stop *placement principle* — nearest meaningful support —
+is what transfers, and on modern charts that principle yields roughly
+22%, not roughly 5%. His percentages are 1980s stocks at 1980s
+volatility, managed on daily charts between weekly reviews. Treating his
+numbers as portable to a weekly-bar screener is a category error.
+
+**Both numbers stay as they are, and are now justified rather than merely
+unretuned.** The 84% "too wide" rate is the tool correctly reporting that
+most breakouts near highs carry real risk, and it costs one condition of
+nine rather than rejecting the setup outright, which is proportionate.
+
 ## Other thresholds, ranked by how much I trust them
 
 **ACTIONABLE_SCORE = 0.80** — most trustworthy of the set, because it

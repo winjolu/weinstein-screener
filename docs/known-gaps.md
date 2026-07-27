@@ -35,6 +35,17 @@ different place.
 
 ## Methodology not yet implemented
 
+**Stop placement — investigated and closed, not a gap.** Mine sits at the
+low of the recent consolidation, around 22% below entry on liquid names,
+against the 5-6% in the book's worked examples. I chased that gap through
+the lookback window, the entry basis, and a full rework that picked the
+nearest level rather than the lowest, and none of them explain it. What
+does: a 5% stop is inside ordinary weekly noise on modern equities, so
+the book's percentages don't transfer to a weekly-bar screener even
+though its placement principle does. Written up in
+[parameter-calibration.md](parameter-calibration.md); recorded here only
+so it doesn't get reopened as though it were still unexplained.
+
 **Partial profit-taking.** `simulate_trade` exits fully at the target,
 while the book uses that level to sell part of a position and lets the
 rest run on the trailing stop. This directly caps winners in every
