@@ -583,6 +583,36 @@ def _evaluate_resistance_breakout(bars, volumes, latest_idx):
     return result, detail
 
 
+CONDITION_NAMES = (
+    "stage_setup", "price_above_ma", "volume_confirmation", "rs_improving",
+    "sector_strength", "market_stage", "resistance_breakout", "pullback_quality",
+    "risk_reward",
+)
+
+
+def _empty_result():
+    """The shape evaluate_conditions returns when there's nothing to read,
+    with every condition unknown. Same keys as a real result so callers
+    don't need to special-case it — the evidence floor in the scoring
+    model already refuses to call anything actionable on no evidence.
+    """
+    conditions = {name: None for name in CONDITION_NAMES}
+    return {
+        "conditions": conditions,
+        "conditions_met": 0,
+        "conditions_detail": {name: {"result": None} for name in CONDITION_NAMES},
+        "scoring": score_conditions(conditions),
+        "actionable": False,
+        "stage": None, "price": None, "ma_30w": None, "price_above_ma": None,
+        "ma_rising": None, "mansfield_rs": None, "rs_improving": None,
+        "rs_ma_rising": None, "volume_ratio": None, "volume_confirmed": None,
+        "market_stage_ok": None, "resistance_level": None,
+        "breakout_confirmed": None, "swing_target": None, "swing_stop": None,
+        "historical_levels": None, "new_52w_high": None, "breakout_idx": None,
+        "breakout_age_weeks": None, "base_is_tight": None, "base_range_pct": None,
+    }
+
+
 def evaluate_conditions(ticker, bars, index_bars, sector_data):
     """Evaluates all 9 checklist conditions for one ticker.
 
@@ -608,6 +638,17 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
     # series is trimmed independently: a recently listed ticker may have
     # fewer bars than the index, and forcing them to a common length here
     # would quietly shorten the stock's own moving average.
+    if not bars or not index_bars:
+        # Nothing to read. This happens for real in a backtest whenever a
+        # checkpoint predates a ticker's first bar — truncating to that
+        # date leaves an empty series, and every later step here indexes
+        # off the end of it. It surfaced as 318 "list index out of range"
+        # failures across one run, each one a checkpoint silently thrown
+        # away behind an error that named the symptom rather than the
+        # cause. A stock that didn't exist yet isn't an error, it's an
+        # unknown.
+        return _empty_result()
+
     bars_offset = max(0, len(bars) - EVALUATION_WEEKS)
     index_offset = max(0, len(index_bars) - EVALUATION_WEEKS)
     bars = bars[bars_offset:]

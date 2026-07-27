@@ -307,3 +307,35 @@ class StopPlacementTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InsufficientHistoryTest(unittest.TestCase):
+    """A checkpoint that predates a ticker's first bar leaves an empty
+    series. That used to index off the end and surface as 318 opaque
+    "list index out of range" failures in a single backtest run — each
+    one a checkpoint silently discarded. A stock that didn't exist yet
+    is an unknown, not an error.
+    """
+
+    def _index(self):
+        return trending_bars(104, 400.0, 0.5)
+
+    def test_no_bars_is_an_unknown_not_a_crash(self):
+        result = C.evaluate_conditions("T", [], self._index(), None)
+        self.assertFalse(result["actionable"])
+        self.assertEqual(result["scoring"]["met"], 0)
+        self.assertTrue(all(v is None for v in result["conditions"].values()))
+
+    def test_no_index_bars_is_also_survivable(self):
+        result = C.evaluate_conditions("T", trending_bars(60), [], None)
+        self.assertFalse(result["actionable"])
+
+    def test_the_empty_result_matches_a_real_one_key_for_key(self):
+        """Callers read these dicts directly, so a short-history result
+        that's missing keys would just move the failure downstream."""
+        real = C.evaluate_conditions("T", trending_bars(104), self._index(), None)
+        self.assertEqual(set(real), set(C._empty_result()))
+
+    def test_a_very_short_history_still_evaluates_without_qualifying(self):
+        result = C.evaluate_conditions("T", trending_bars(104)[-8:], self._index(), None)
+        self.assertFalse(result["actionable"])
