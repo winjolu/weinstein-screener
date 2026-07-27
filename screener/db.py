@@ -327,9 +327,23 @@ def insert_backtest_trade(trade):
     """I insert one simulated trade from backtest.py. Unknown keys in
     `trade` beyond BACKTEST_TRADE_COLUMNS are ignored, same filtering
     approach as insert_result.
+
+    One row per ticker per entry date per parameter set. Without that,
+    re-running a parameter set over the same window appended a second
+    copy of every trade, and since the report just aggregates whatever
+    rows exist, the sample silently doubled — win rate, expectancy and
+    trade count all computed off duplicates that look like independent
+    observations. That matters more here than almost anywhere else in
+    the project, because these are the numbers I use to decide whether a
+    parameter is worth keeping.
     """
     conn = _connect()
     try:
+        conn.execute(
+            "DELETE FROM backtest_trades WHERE ticker = ? AND entry_date = ? "
+            "AND parameter_set IS ?",
+            (trade.get("ticker"), trade.get("entry_date"), trade.get("parameter_set")),
+        )
         columns = [c for c in BACKTEST_TRADE_COLUMNS if c in trade]
         placeholders = ", ".join("?" for _ in columns)
         conn.execute(
