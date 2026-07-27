@@ -141,8 +141,13 @@ def _could_still_qualify(result):
     if scoring["blocking"]:
         return False
 
-    best_met = scoring["met"] + 1
-    best_resolved = scoring["resolved"] + 1
+    # Only credit the sector condition if it's actually still pending.
+    # Adding it unconditionally would inflate both counts on any result
+    # that already has a sector — and push the resolved total past the
+    # nine conditions that exist.
+    pending = 1 if result["conditions"].get("sector_strength") is None else 0
+    best_met = scoring["met"] + pending
+    best_resolved = scoring["resolved"] + pending
     if best_resolved < conditions.MIN_RESOLVED_CONDITIONS:
         return False
     return best_met >= math.ceil(conditions.ACTIONABLE_SCORE * best_resolved)
