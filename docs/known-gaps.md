@@ -46,11 +46,17 @@ though its placement principle does. Written up in
 [parameter-calibration.md](parameter-calibration.md); recorded here only
 so it doesn't get reopened as though it were still unexplained.
 
-**Partial profit-taking.** `simulate_trade` exits fully at the target,
-while the book uses that level to sell part of a position and lets the
-rest run on the trailing stop. This directly caps winners in every
-backtest number produced so far, and it's the most likely single change
-to alter the measured edge.
+**The trailing stop gives back too much.** Now the likeliest weak link,
+surfaced by implementing partial profit-taking and finding it made
+results worse rather than better: taking the whole position off at the
+target beat holding half of it. Letting a runner continue produced the
+single best trade in the sample and the worst average, because the
+30-week MA the stop rides sits far below price after a sharp advance.
+A stop that tracked the move more closely might make holding the
+remainder worthwhile — which is the premise of the whole method, so
+it's worth knowing whether the mechanism or the premise is at fault.
+Measured on ten target-reaching trades, so treat as a lead rather than
+a finding.
 
 **The short-side checklist.** Only a heuristic pointer exists in the
 summary output. The book's rules aren't symmetric — volume confirmation
@@ -88,12 +94,14 @@ own:
 
 ## Technical debt
 
-- **`backtest_trades` has no deduplication.** Re-running a parameter set
-  silently doubles the sample and skews every statistic. The equivalent
-  bug in `screener_results` is fixed; this one isn't.
 - **`--limit` takes a prefix, not a sample**, so a limited universe run
   is not representative of the market. Fine for smoke tests, misleading
   for anything else, and the help text doesn't say so.
+- **Whether thin names *perform* as well is untested.** The liquidity
+  floor now sits where data integrity breaks, and names reach the
+  prefilter at the same rate regardless of liquidity — but qualifying at
+  the same rate isn't the same as working out as well, and the backtest
+  has never been segmented by liquidity to check.
 - **`historical_levels` mislabels its windows.** On weekly bars, "5D" is
   a single bar and "all_time" means "as far back as the evaluation window
   reaches", not all time.
