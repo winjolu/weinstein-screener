@@ -128,6 +128,30 @@ class BacktestTradeTest(_TempDB):
         self.assertEqual(len(db.get_backtest_trades(parameter_set="baseline")), 1)
         self.assertEqual(len(db.get_backtest_trades()), 2)
 
+    def test_rerunning_a_parameter_set_replaces_rather_than_doubles(self):
+        """Re-running the same backtest used to append a second copy of
+        every trade, silently doubling the sample the report aggregates.
+        """
+        db.insert_backtest_trade(self._trade(exit_price=110.0, return_pct=10.0))
+        db.insert_backtest_trade(self._trade(exit_price=120.0, return_pct=20.0))
+        rows = db.get_backtest_trades()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["return_pct"], 20.0)
+
+    def test_the_same_ticker_may_hold_several_trades_at_different_entries(self):
+        """Sequential non-overlapping trades in one ticker are real and
+        must survive deduplication."""
+        db.insert_backtest_trade(self._trade(entry_date="2025-01-06"))
+        db.insert_backtest_trade(self._trade(entry_date="2025-06-02"))
+        self.assertEqual(len(db.get_backtest_trades()), 2)
+
+    def test_the_same_trade_under_two_parameter_sets_is_two_observations(self):
+        """A/B comparison depends on the same trade appearing once per
+        parameter set."""
+        db.insert_backtest_trade(self._trade(parameter_set="baseline"))
+        db.insert_backtest_trade(self._trade(parameter_set="pivot_length=10"))
+        self.assertEqual(len(db.get_backtest_trades()), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
