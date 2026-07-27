@@ -134,6 +134,55 @@ unretuned.** The 84% "too wide" rate is the tool correctly reporting that
 most breakouts near highs carry real risk, and it costs one condition of
 nine rather than rejecting the setup outright, which is proportionate.
 
+## Trailing stop: the book's own method measured worse (2026-07-27)
+
+Partial profit-taking failing pointed at the trailing stop, on the
+theory that the 30-week average sits too far below price after a sharp
+advance and hands back the gain. Reading the book properly showed my
+trailing stop wasn't its method at all. The book waits for a correction
+of at least 8-10%, holds off raising anything until the stock rallies
+back near its prior high, then places the stop under the correction low
+or under the average depending on which is lower — and, once the average
+flattens and a Stage 3 top becomes likely, moves under the correction
+low even when that sits above the average. Mine just followed the
+average, with no notion of corrections and no tightening near a top.
+
+Implemented as a third method and measured across 200 tickers over
+nearly three years, roughly 220 resolved trades per arm rather than the
+29 I'd been deciding on:
+
+| trailing stop | resolved | win% | payoff | per trade | total R |
+|---|---|---|---|---|---|
+| 30-week average (mine) | 220 | 39.5% | 2.24 | +2.86% | +22.8 |
+| swing lows (mine) | 133 | 39.8% | 1.40 | −0.58% | +3.8 |
+| corrections, per the book | 140 | 36.4% | 1.15 | −2.99% | −10.2 |
+
+The average wins clearly, and the book's method is worst. Its stop moves
+so rarely that positions don't resolve — 58 of 198 still open against 14
+of 234 — so it isn't holding winners longer so much as failing to close
+anything.
+
+Two honest qualifications. The confirmation threshold, "rallies back
+close to its prior peak", is a number I invented to operationalise a
+phrase; too strict a value would produce exactly this symptom, so I
+can't fully separate "the book's method is worse here" from "my reading
+of it is wrong". And the 107 trades common to all three arms show every
+method negative, because a trade only appears in that subset if it
+resolved under the loosest stop too, which selects for losers.
+
+**The default stays on the 30-week average.** The book's method stays in
+the code as a named option, since the finding is about my implementation
+of it rather than about the idea.
+
+### The samples I'd been deciding on were too small
+
+Worth recording separately. The same window on 20 tickers gave a 51.7%
+win rate and a 1.61 payoff; 200 tickers gave 39.5% and 2.24. Those
+aren't refinements of each other, and the earlier figure flattered the
+win rate while hiding a genuinely better payoff profile. Anything
+concluded from a 29-trade sample in this project should be treated as a
+hint, and the 200-ticker harness takes about three minutes an arm.
+
 ## Other thresholds, ranked by how much I trust them
 
 **ACTIONABLE_SCORE = 0.80** — most trustworthy of the set, because it
