@@ -46,17 +46,18 @@ though its placement principle does. Written up in
 [parameter-calibration.md](parameter-calibration.md); recorded here only
 so it doesn't get reopened as though it were still unexplained.
 
-**The trailing stop gives back too much.** Now the likeliest weak link,
-surfaced by implementing partial profit-taking and finding it made
-results worse rather than better: taking the whole position off at the
-target beat holding half of it. Letting a runner continue produced the
-single best trade in the sample and the worst average, because the
-30-week MA the stop rides sits far below price after a sharp advance.
-A stop that tracked the move more closely might make holding the
-remainder worthwhile — which is the premise of the whole method, so
-it's worth knowing whether the mechanism or the premise is at fault.
-Measured on ten target-reaching trades, so treat as a lead rather than
-a finding.
+**The book's trailing rule is implemented but underperforms mine.**
+Chased as the explanation for partial profit-taking failing, and it
+isn't one: measured over 200 tickers, following the 30-week average
+returns +2.86% a trade against −2.99% for the book's correction-based
+rule. The rule is available as `trailing_method='book'` and stays there
+because the failure is likely mine rather than the method's — the
+confirmation threshold that decides when the stop may move is a number
+I invented to operationalise "rallies back close to its prior peak",
+and too strict a value produces precisely the symptom observed, which
+is a stop that almost never moves. Worth revisiting by sweeping that
+threshold rather than by rereading the book. See
+[parameter-calibration.md](parameter-calibration.md).
 
 **The short-side checklist.** Only a heuristic pointer exists in the
 summary output. The book's rules aren't symmetric — volume confirmation

@@ -15,6 +15,33 @@ whereas a list of intentions needs pruning to stay honest.
 
 ## [Unreleased]
 
+### Added
+- The book's own trailing-stop rule as `trailing_method='book'`: waits
+  for a correction of at least 8-10%, holds off until the stock rallies
+  back near its prior high, then places the stop under the correction
+  low or the average depending on which is lower, and tightens onto the
+  correction low once the average flattens into a likely Stage 3 top.
+
+### Fixed
+- A checkpoint predating a ticker's first bar left an empty series and
+  crashed the evaluator — 318 silent "list index out of range" failures
+  in a single backtest run, each one a discarded checkpoint. A stock
+  that didn't exist yet is an unknown, not an error. Results were
+  unaffected, since those checkpoints could never have produced trades.
+
+### Investigated, no change made
+- **The book's trailing rule performs worse than following the average.**
+  Across 200 tickers and roughly 220 resolved trades an arm: the 30-week
+  average returns +2.86% a trade at a 2.24 payoff, swing lows −0.58%,
+  and the book's rule −2.99%. Its stop moves so rarely that positions
+  don't resolve at all. Default stays on the average. The likely fault
+  is my confirmation threshold rather than the method — noted in
+  known-gaps with the sweep that would settle it.
+- **The 20-ticker samples I'd been deciding on were misleading.** The
+  same window gave a 51.7% win rate and 1.61 payoff on 20 tickers
+  against 39.5% and 2.24 on 200 — flattering the hit rate while hiding a
+  better payoff profile.
+
 ### Fixed
 - Re-running a backtest parameter set appended a second copy of every
   trade instead of replacing it. The report aggregates whatever rows
