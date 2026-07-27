@@ -54,6 +54,13 @@ LOOKBACK_BUFFER_WEEKS = 90
 
 MIN_TRADES_FOR_CONFIDENCE = 30
 
+# How much of a position comes off at the swing-rule target, with the
+# rest left to the trailing stop. Half is the book's own figure — it says
+# to take profits on only half the position when the target area is
+# reached, and to sell the remainder when the stop is set off. One of the
+# few numbers in this project I didn't have to invent.
+PARTIAL_EXIT_FRACTION = 0.5
+
 
 def _truncate_bars(bars_full, as_of_date):
     """Keeps only bars dated on or before as_of_date (a "YYYY-MM-DD"
@@ -125,26 +132,42 @@ def evaluate_as_of(ticker, as_of_date, bars_full, index_bars_full, sector_data_f
 
 
 def simulate_trade(ticker, entry_date, entry_price, swing_stop, swing_target, bars_full,
-                    trailing_method='ma', max_hold_weeks=52):
+                    trailing_method='ma', max_hold_weeks=52,
+                    partial_exit_fraction=None):
     """Walks forward week by week from entry_date, recomputing
     stop_loss.trailing_stop() using only bars up to and including each
     simulated week (a real trailing stop can only react to price action
     that's already happened by that week), and checks whether that
     week's low hit the current stop or its high hit swing_target.
 
+    Reaching the target sells *part* of the position and lets the rest
+    ride the trailing stop, which is what the book actually prescribes —
+    it uses the swing-rule level for partial selling and takes the
+    remainder off when the stop is hit. Exiting fully at the target, as
+    this did before, truncated every winner at its measured objective
+    and made the whole method look like a fixed-target system. It was
+    the single largest distortion left in the backtest.
+
     When both could plausibly be hit in the same week, I check the stop
     first — weekly OHLC alone can't tell me the actual intraweek order,
     and assuming the stop hit first is the more conservative read.
 
-    Running out of bars_full or reaching max_hold_weeks without an exit
-    both come back as "still_open" — from the backtest's perspective
-    those are the same situation: the real outcome isn't known yet.
+    Running out of bars_full or reaching max_hold_weeks without the
+    remainder closing both come back as "still_open", even when a
+    partial profit was already banked: the trade's final number isn't
+    known yet, and counting an unrealised remainder would flatter it.
 
-    :return: {"ticker", "entry_date", "entry_price", "exit_date",
-        "exit_price", "exit_reason", "return_pct", "r_multiple",
-        "still_open"}, or None if entry_date has no matching bar in
-        bars_full.
+    :return: trade dict, or None if entry_date has no matching bar.
+        return_pct and r_multiple are position-weighted across both legs.
     """
+    # Resolved here rather than as a default argument. A default binds
+    # once at definition time, so patching the module constant to A/B the
+    # exit policy silently did nothing and both arms of the comparison
+    # ran identically — which reads as "this change makes no difference"
+    # rather than as a broken experiment.
+    if partial_exit_fraction is None:
+        partial_exit_fraction = PARTIAL_EXIT_FRACTION
+
     dates = [b["time"][:10] for b in bars_full]
     try:
         entry_idx = dates.index(entry_date)
@@ -153,9 +176,11 @@ def simulate_trade(ticker, entry_date, entry_price, swing_stop, swing_target, ba
 
     stop = stop_loss.initial_stop(swing_stop)
     last_idx = min(entry_idx + max_hold_weeks, len(bars_full) - 1)
+    risk = entry_price - swing_stop if swing_stop is not None else None
 
+    partial_idx = None
+    partial_price = None
     exit_idx = None
-    exit_reason = None
     exit_price = None
 
     for idx in range(entry_idx + 1, last_idx + 1):
@@ -167,39 +192,50 @@ def simulate_trade(ticker, entry_date, entry_price, swing_stop, swing_target, ba
 
         bar = bars_full[idx]
         if stop is not None and bar["low"] <= stop:
-            exit_idx, exit_reason, exit_price = idx, "stop", stop
+            exit_idx, exit_price = idx, stop
             break
-        if swing_target is not None and bar["high"] >= swing_target:
-            exit_idx, exit_reason, exit_price = idx, "target", swing_target
-            break
+        if (
+            swing_target is not None
+            and partial_idx is None
+            and bar["high"] >= swing_target
+        ):
+            # Bank part of it and keep going; the rest belongs to the
+            # trailing stop now.
+            partial_idx, partial_price = idx, swing_target
 
-    if exit_idx is None:
+    took_partial = partial_idx is not None
+    remainder_closed = exit_idx is not None
+
+    if not remainder_closed:
         return {
             "ticker": ticker,
             "entry_date": entry_date,
             "entry_price": entry_price,
             "exit_date": None,
             "exit_price": None,
-            "exit_reason": "still_open",
+            "exit_reason": "target_then_open" if took_partial else "still_open",
             "return_pct": None,
             "r_multiple": None,
             "still_open": True,
         }
 
-    exit_date = bars_full[exit_idx]["time"][:10]
-    return_pct = (exit_price - entry_price) / entry_price * 100
-    risk = entry_price - swing_stop if swing_stop is not None else None
-    r_multiple = (exit_price - entry_price) / risk if risk and risk > 0 else None
+    if took_partial:
+        held = 1.0 - partial_exit_fraction
+        blended_exit = partial_exit_fraction * partial_price + held * exit_price
+        exit_reason = "target_then_stop"
+    else:
+        blended_exit = exit_price
+        exit_reason = "stop"
 
     return {
         "ticker": ticker,
         "entry_date": entry_date,
         "entry_price": entry_price,
-        "exit_date": exit_date,
-        "exit_price": exit_price,
+        "exit_date": bars_full[exit_idx]["time"][:10],
+        "exit_price": blended_exit,
         "exit_reason": exit_reason,
-        "return_pct": return_pct,
-        "r_multiple": r_multiple,
+        "return_pct": (blended_exit - entry_price) / entry_price * 100,
+        "r_multiple": (blended_exit - entry_price) / risk if risk and risk > 0 else None,
         "still_open": False,
     }
 

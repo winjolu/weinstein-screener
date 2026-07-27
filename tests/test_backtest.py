@@ -107,6 +107,98 @@ class SimulateTradeTest(unittest.TestCase):
         )
 
 
+class PartialProfitTakingTest(unittest.TestCase):
+    """The target sells part of the position; the rest rides the trailing
+    stop. Exiting fully at the target truncated every winner at its own
+    measured objective, which quietly turned a trend-following method
+    into a fixed-target one — and nothing in the suite covered the target
+    path at all, which is why it went unnoticed.
+    """
+
+    def _bars(self, closes):
+        dates = weekly_dates(len(closes))
+        return [bar(d, c * 1.02, c * 0.98, c) for d, c in zip(dates, closes)]
+
+    TARGET = 120.0
+
+    def _run_past_target(self, **kw):
+        # A 40-week warm-up so the 30-week MA the trailing stop rides
+        # actually exists, then entry, a rally clean through the target,
+        # and a decline deep enough to take the remainder out.
+        closes = (
+            [60.0 + i for i in range(40)]
+            + [110.0, 125.0, 150.0, 175.0, 200.0, 160.0, 140.0, 120.0, 100.0, 95.0]
+        )
+        bars = self._bars(closes)
+        return backtest.simulate_trade(
+            "T", bars[39]["time"][:10], closes[39],
+            swing_stop=90.0, swing_target=self.TARGET, bars_full=bars, **kw
+        )
+
+    def test_reaching_the_target_does_not_close_the_position(self):
+        trade = self._run_past_target()
+        self.assertEqual(trade["exit_reason"], "target_then_stop")
+        # Exited later and lower than the target, which can only happen
+        # if the remainder kept running after the target was reached.
+        self.assertNotAlmostEqual(trade["exit_price"], self.TARGET, places=6)
+
+    def test_blend_is_the_position_weighted_average_of_the_two_legs(self):
+        """Verified against the ends of the range rather than an assumed
+        remainder price: selling none must equal the trailing-stop exit,
+        selling all must equal the target, and half must sit exactly
+        between them."""
+        none_taken = self._run_past_target(partial_exit_fraction=0.0)["exit_price"]
+        all_taken = self._run_past_target(partial_exit_fraction=1.0)["exit_price"]
+        half_taken = self._run_past_target(partial_exit_fraction=0.5)["exit_price"]
+
+        self.assertAlmostEqual(all_taken, self.TARGET, places=6)
+        self.assertAlmostEqual(half_taken, 0.5 * all_taken + 0.5 * none_taken, places=6)
+
+    def test_the_module_default_is_patchable(self):
+        """The fraction has to be read at call time. Bound as a default
+        argument it fixes at import, so patching it to compare exit
+        policies changes nothing and both arms of the A/B run identically
+        — which looks like a null result rather than a broken test.
+        """
+        original = backtest.PARTIAL_EXIT_FRACTION
+        try:
+            backtest.PARTIAL_EXIT_FRACTION = 1.0
+            self.assertAlmostEqual(self._run_past_target()["exit_price"], self.TARGET, places=6)
+            backtest.PARTIAL_EXIT_FRACTION = 0.0
+            self.assertNotAlmostEqual(self._run_past_target()["exit_price"], self.TARGET, places=6)
+        finally:
+            backtest.PARTIAL_EXIT_FRACTION = original
+
+    def test_the_fraction_moves_the_blend_monotonically(self):
+        prices = [
+            self._run_past_target(partial_exit_fraction=f)["exit_price"]
+            for f in (0.0, 0.25, 0.5, 0.75, 1.0)
+        ]
+        self.assertEqual(prices, sorted(prices), "blend should move steadily toward the target")
+
+    def test_stopping_before_the_target_is_unaffected(self):
+        closes = [100.0] * 5 + [95.0, 88.0, 80.0]
+        bars = self._bars(closes)
+        trade = backtest.simulate_trade(
+            "T", bars[4]["time"][:10], 100.0,
+            swing_stop=95.0, swing_target=130.0, bars_full=bars,
+        )
+        self.assertEqual(trade["exit_reason"], "stop")
+
+    def test_a_banked_partial_does_not_make_an_open_trade_scoreable(self):
+        """Half realised and half still running is not a finished trade;
+        counting the unrealised remainder would flatter the result."""
+        closes = [100.0] * 5 + [130.0, 135.0, 140.0]
+        bars = self._bars(closes)
+        trade = backtest.simulate_trade(
+            "T", bars[4]["time"][:10], 100.0,
+            swing_stop=90.0, swing_target=120.0, bars_full=bars, max_hold_weeks=3,
+        )
+        self.assertTrue(trade["still_open"])
+        self.assertEqual(trade["exit_reason"], "target_then_open")
+        self.assertIsNone(trade["return_pct"])
+
+
 class TrailingStopTest(unittest.TestCase):
     def test_stop_ratchets_and_never_retreats(self):
         """A trailing stop that can move down isn't a trailing stop."""
