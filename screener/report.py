@@ -14,7 +14,6 @@ A report can therefore never surprise me with a different answer than the
 scan gave — if a number looks wrong, the scan is where to look.
 """
 import argparse
-import datetime
 import json
 import sys
 

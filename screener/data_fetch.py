@@ -27,6 +27,42 @@ from . import db, rate_limit, sector_strength
 # call's capacity.
 MAX_SYMBOLS_PER_BATCH = 20
 
+# The server rejects any `count` above this outright, with an
+# ILLEGAL_PARAMETER 417 rather than a truncated response. Confirmed
+# against the live API on 2026-07-28: 1200 returns 1199 weekly bars for
+# SPY (back to 2003-08-08), 1600 is refused.
+#
+# I already had this written down for daily bars in the API reference,
+# and the code passed straight through it anyway, which cost more than
+# not knowing would have. The failure isn't graceful: run_backtest asks
+# for enough daily bars to span the whole test window, so any backtest
+# starting more than about 3.3 years back threw on every sector fetch,
+# got swallowed by a bare except, and ran the entire test with no sector
+# data at all — condition 5 unresolved at every checkpoint rather than
+# only at the early ones it genuinely can't reach. backtest.py's own
+# docstring lists the cap as an open unknown; it wasn't.
+MAX_BARS_PER_REQUEST = 1200
+
+
+def _capped(count, what, symbol=None):
+    """Clamps a bar count to what the server will accept.
+
+    Truncating loses the oldest bars, which for a backtest means the
+    earliest checkpoints legitimately can't resolve conditions needing
+    that history — the documented and intended failure mode. Refusing
+    the whole request, which is what happened before, loses all of it.
+    """
+    count = int(count)
+    if count <= MAX_BARS_PER_REQUEST:
+        return count
+    where = f" for {symbol}" if symbol else ""
+    print(f"WARNING: asked for {count} {what} bars{where}, server caps at "
+          f"{MAX_BARS_PER_REQUEST}. Truncating to the most recent "
+          f"{MAX_BARS_PER_REQUEST}; anything older is unavailable and "
+          f"conditions needing it will come back unknown.")
+    return MAX_BARS_PER_REQUEST
+
+
 _data_client = None
 _spy_daily_closes_cache = None
 _sector_etf_closes_cache = {}
@@ -119,7 +155,8 @@ def _fetch_chunk(client, chunk, lookback_weeks, include_partial_week, out):
     rate_limit.acquire()
     try:
         response = client.market_data.get_batch_history_bar(
-            chunk, Category.US_STOCK.name, Timespan.W.name, count=str(lookback_weeks)
+            chunk, Category.US_STOCK.name, Timespan.W.name,
+            count=str(_capped(lookback_weeks, "weekly"))
         )
     except Exception as exc:
         if len(chunk) == 1:
@@ -204,7 +241,8 @@ def get_weekly_bars(ticker, lookback_weeks=104, include_partial_week=False):
     client = _get_client()
     rate_limit.acquire()
     response = client.market_data.get_batch_history_bar(
-        [ticker], Category.US_STOCK.name, Timespan.W.name, count=str(lookback_weeks)
+        [ticker], Category.US_STOCK.name, Timespan.W.name,
+        count=str(_capped(lookback_weeks, "weekly", ticker))
     )
     return _drop_partial_week(_bars_from_response(response, ticker), include_partial_week)
 
@@ -237,7 +275,8 @@ def get_index_bars(index_symbol="SPX", lookback_weeks=104, include_partial_week=
     client = _get_client()
     rate_limit.acquire()
     response = client.market_data.get_batch_history_bar(
-        [index_symbol], Category.US_ETF.name, Timespan.W.name, count=str(lookback_weeks)
+        [index_symbol], Category.US_ETF.name, Timespan.W.name,
+        count=str(_capped(lookback_weeks, "weekly", index_symbol))
     )
     return _drop_partial_week(_bars_from_response(response, index_symbol), include_partial_week)
 
@@ -253,7 +292,8 @@ def get_daily_bars(symbol, category, lookback_days=30):
     client = _get_client()
     rate_limit.acquire()
     response = client.market_data.get_batch_history_bar(
-        [symbol], category, Timespan.D.name, count=str(lookback_days)
+        [symbol], category, Timespan.D.name,
+        count=str(_capped(lookback_days, "daily", symbol))
     )
     return _bars_from_response(response, symbol)
 
@@ -391,6 +431,28 @@ def get_sector_data(ticker):
     }
 
 
+# Daily bars for the sector ETFs and SPY, memoised for the life of the
+# process. A backtest calls get_sector_data_for_backtest once per ticker
+# and every one of those calls re-fetched the identical SPY series, so a
+# 200-ticker run spent 200 requests on the same 1,200 bars — a third of
+# its entire API budget, and a third of its wall-clock time, on data it
+# already had. There are only eleven sector ETFs, so the same argument
+# applies to those.
+#
+# Safe to hold in memory because these are completed daily bars for a
+# fixed lookback: within one run they cannot change. Not persisted, since
+# a stale daily series across days would be a subtler problem than the
+# one this solves.
+_daily_bar_cache = {}
+
+
+def _cached_daily_bars(symbol, category, lookback_days):
+    key = (symbol, category, int(lookback_days))
+    if key not in _daily_bar_cache:
+        _daily_bar_cache[key] = get_daily_bars(symbol, category, lookback_days)
+    return _daily_bar_cache[key]
+
+
 def get_sector_data_for_backtest(ticker, lookback_days):
     """Like get_sector_data(), but for backtest.py: returns full
     timestamped daily bars for the ticker's mapped sector ETF and for
@@ -417,9 +479,15 @@ def get_sector_data_for_backtest(ticker, lookback_days):
     if sector_name:
         try:
             sector_etf = sector_strength.get_sector_etf(sector_name)
-            sector_etf_bars = get_daily_bars(sector_etf, Category.US_ETF.name, lookback_days)
-            spy_bars = get_daily_bars("SPY", Category.US_ETF.name, lookback_days)
-        except Exception:
+            sector_etf_bars = _cached_daily_bars(sector_etf, Category.US_ETF.name, lookback_days)
+            spy_bars = _cached_daily_bars("SPY", Category.US_ETF.name, lookback_days)
+        except Exception as exc:
+            # This used to swallow the reason entirely, which is how an
+            # over-long backtest ran with condition 5 unresolved at every
+            # checkpoint and looked exactly like a normal run. Empty bars
+            # are still the right fallback — the condition comes back
+            # unknown rather than guessed — but not silently.
+            print(f"[{ticker}] sector data unavailable ({sector_name}): {str(exc)[:110]}")
             sector_etf_bars = []
             spy_bars = []
 

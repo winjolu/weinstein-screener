@@ -27,14 +27,18 @@ LOOKAHEAD-BIAS NOTES — read before trusting any result from this module:
    forward for data that didn't exist yet — that's the intended failure
    mode, not a bug.
 
-3. I do NOT know Webull's actual cap (if any) on the `count` parameter
-   for daily bars over a long lookback. run_backtest() requests enough
-   lookback_days to cover the full test window plus warm-up, but if the
-   real API caps that lower than requested, sector-dependent conditions
-   could come back None more often than they should for the earliest
-   part of a long backtest. I haven't verified this against a real
-   multi-year request — worth checking directly before trusting a long
-   backtest's early checkpoints.
+3. The cap is 1200 bars on every timespan, measured 2026-07-28, and the
+   worry recorded here was justified — it was worse than "None more
+   often than it should be". The server refuses an oversized request
+   outright rather than truncating it, so a backtest starting more than
+   about 3.3 years back failed *every* sector fetch, not just the early
+   ones, and a bare except turned that into a full run with condition 5
+   unresolved at every checkpoint. data_fetch._capped() now clamps and
+   warns, which restores the intended behaviour: sector-dependent
+   conditions come back None only for checkpoints older than the ~4.8
+   years of daily bars the cap allows. Weekly bars reach ~23 years, so
+   condition 6 — the market-stage read, and the one a long backtest is
+   really for — is unaffected.
 
 4. simulate_trade() is the one place that deliberately does NOT truncate
    bars_full — a trade's actual outcome depends on what price really did

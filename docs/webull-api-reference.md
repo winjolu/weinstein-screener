@@ -54,8 +54,21 @@ contradict what I'd assumed.
   is what the screener did until I checked.
 - **Rate limit is 300 requests per 60 seconds**, i.e. 5/sec — half what
   I had assumed. screener/rate_limit.py throttles against this.
-- **Daily bars cap at count=1200**, so roughly 4.75 years. Requesting
-  more fails with ILLEGAL_PARAMETER. Weekly bars accept at least 600.
+- **Bars cap at count=1200 on every timespan**, daily and weekly alike.
+  Requesting more fails with ILLEGAL_PARAMETER 417 — the request is
+  refused outright, not truncated to the maximum. For daily bars that's
+  about 4.75 years; for weekly it's about 23 years, and 1200 returns
+  1,199 weekly SPY bars reaching back to 2003-08-08, which is the
+  practical limit on how far any backtest can go.
+
+  I had this recorded for daily bars and the code still didn't honour
+  it, which cost more than not knowing would have. `run_backtest` sizes
+  its daily sector request to span the whole test window, so any
+  backtest starting more than ~3.3 years back threw on every sector
+  fetch, hit a bare `except`, and ran to completion with condition 5
+  unresolved at every checkpoint — output identical in shape to a good
+  run. `data_fetch._capped()` now clamps every count and says so.
+  Documenting a limit isn't the same as enforcing one.
 - **The instrument endpoint returns 1,000 records per call** and
   paginates on last_instrument_id. The full listed universe is 64,358
   instruments across 65 pages — my first page cap of 40 silently
@@ -64,7 +77,19 @@ contradict what I'd assumed.
   ETF-specific fields (etf_leveraged_factor, crypto_etf,
   single_stock_etf) are populated for pooled products and absent for
   ordinary shares. Filtering on the field beats matching on the name,
-  which misclassifies REITs and other legitimate trusts.
+  which misclassifies REITs and other legitimate trusts. Test all three
+  fields, not just the leverage factor — that one is ETF-specific, so
+  closed-end funds leave it empty and read as ordinary stock. `crypto_etf`
+  is the one that separates them: present-but-false on a CEF, absent on
+  a real company.
+- **There is no security-type field.** Nothing distinguishes a preferred
+  share, a SPAC unit or a warrant from common stock, and preferreds
+  carry their parent company's full profile including its sector. The
+  only signals are the symbol conventions (` PR<letter>`, five-letter
+  Nasdaq suffixes) plus `margin_requirement_long` as corroboration —
+  see `universe.classify_security_types`. Note that
+  `margin_requirement_long` tracks illiquidity, not type: ordinary
+  small-cap banks sit at 100% alongside every preferred.
 - **A company's sector arrives as an "industries" list**, broadest entry
   first — not a "sector" or "industry" field. ETFs carry an empty list,
   which is legitimate rather than an error.
