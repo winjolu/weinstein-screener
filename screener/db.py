@@ -222,6 +222,31 @@ def get_latest_results():
         conn.close()
 
 
+def get_run_dates(limit=None):
+    """Scan dates, newest first."""
+    conn = _connect()
+    try:
+        sql = "SELECT DISTINCT run_date FROM screener_results ORDER BY run_date DESC"
+        if limit:
+            sql += f" LIMIT {int(limit)}"
+        return [row[0] for row in conn.execute(sql).fetchall()]
+    finally:
+        conn.close()
+
+
+def get_results_for_run(run_date):
+    """Every row from one scan."""
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            "SELECT * FROM screener_results WHERE run_date = ? ORDER BY ticker", (run_date,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def get_ticker_history(ticker, weeks_back):
     """I return a ticker's most recent `weeks_back` screener_results rows, oldest first."""
     conn = _connect()

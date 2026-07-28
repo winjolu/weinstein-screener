@@ -16,6 +16,19 @@ whereas a list of intentions needs pruning to stay honest.
 ## [Unreleased]
 
 ### Added
+- A reporting layer, `screener/report.py`, for reading back what a scan
+  already found. The scan stores a full condition breakdown for every
+  name reaching the prefilter and printed almost none of it; the only
+  ways to see any of it were a 300-name terminal dump or hand-written
+  SQL. Three views: `--ticker` for one name's checklist, stop, entry plan
+  and scoring history; `--diff` for what changed between two scans, with
+  Stage 1 to Stage 2 crossings called out first because that transition
+  is the whole point of the method; and `--actionable` for the current
+  shortlist grouped by sector rather than ranked flat, since the book's
+  sequence is top-down and six names from one sector is itself a signal.
+  Database only, no API calls, so it runs instantly and offline.
+- Two `db` helpers the reports needed: scan dates, and results scoped to
+  one scan. Diffing had no way to ask for a specific run.
 - The book's own trailing-stop rule as `trailing_method='book'`: waits
   for a correction of at least 8-10%, holds off until the stock rallies
   back near its prior high, then places the stop under the correction
