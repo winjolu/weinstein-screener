@@ -20,36 +20,36 @@ testing it against the book's worked example caught a real error, so
 reasoning alone has a poor track record here. A false negative in this
 function is invisible: the ticker simply never appears.
 
-**The universe admits instruments that stage analysis doesn't apply to,
-and they dominate the shortlist.** This was the "only partly validated"
-fund discriminator note, and reading a scan back through the new report
-turned the open question into a measured one. Roughly a quarter of the
-309 actionable names on the 2026-07-27 scan are not common stock:
+**The security-type classifier rests on two exchange conventions, and
+one of them is only mostly reliable.** `classify_security_types` now
+keeps preferreds, units, warrants and closed-end funds out of the scan,
+which removed 75 of 309 actionable names. What it rests on:
 
-- **Preferred shares and baby bonds** (~35 names). `is_fund` doesn't
-  address these at all — they're not funds. They inherit the parent
-  company's sector, so `AGNCL`, `AGNCO` and `ADAML` all score 9 of 9 and
-  rank at the very top of the list. They shouldn't: a fixed-rate
-  instrument oscillating narrowly above its 30-week average isn't a
-  Stage 2 advance, it's an interest-rate product, and every condition
-  the checklist tests reads as a pass for the wrong reason.
-- **Closed-end funds** (~46 names: `RVT`, `KYN`, `RQI`, `RIV`, `ECAT`,
-  and others). `is_fund` keys on `etf_leveraged_factor` being populated,
-  which is ETF-specific, so CEFs come back `is_fund = 0` and survive even
-  a fund-excluding run. This is exactly the 343 unflagged fund-like names
-  I'd assumed were REITs and trusts — the assumption was wrong.
+- The ` PR<letter>` notation is unambiguous and I trust it outright.
+- The five-letter Nasdaq suffix is not. It needs a tradability
+  confirmation to avoid classifying `GOOGL` as an Alphabet preferred,
+  and that confirmation is a 100% margin requirement — which is a
+  *liquidity* signal being borrowed as a *type* signal. It happens to
+  separate the cases I checked, but it isn't measuring the right thing,
+  so a liquid preferred with a five-letter symbol and no ` PR` notation
+  would be admitted, and an illiquid second share class could be
+  wrongly excluded. `UONEK` (Urban One Class D) is the near-miss: it
+  survives only because `K` is on the share-class exemption list.
 
-The two failure directions aren't symmetric. A wrongly excluded stock
-vanishes silently; these are wrongly *included*, which is visible but
-puts three preferreds at the head of the list I'd work through first.
-Fixing it needs a security-type test rather than a name-pattern one,
-since `HTB` (HomeTrust Bancshares) is an ordinary bank that any
-"Trust in the name" heuristic would throw out.
+The exemption list — A, B, C, K — is mine, derived from the cases I
+found rather than from the convention's definition. A share class using
+some other letter would be silently dropped.
+
+**Validated against 52 hand-labelled symbols with no mismatches**, which
+is reassuring but is 52 out of 10,163, and they're the cases I already
+knew to look for. `--include-non-common` exists so the exclusion can be
+measured rather than trusted.
 
 **The reverse direction is still unchecked.** 16 instruments disagreed
-with `is_fund` in the original aggregate check and I never inspected
-them. If the ETF field is ever populated for an ordinary company, that
-stock disappears from the universe with no trace.
+with the old `is_fund` in an aggregate check and I never inspected them.
+If an ETF field is ever populated for an ordinary company, that stock
+disappears from the universe with no trace — and widening the fund test
+to three fields widened that exposure too.
 
 **Positional pairing of daily series.** Relative strength now pairs stock
 and index by date, but the sector-ETF and SPY daily closes feeding

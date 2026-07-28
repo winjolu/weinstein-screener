@@ -166,3 +166,143 @@ class ScreenableFilterTest(FundDiscriminatorTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SecurityTypeTest(unittest.TestCase):
+    """Stage analysis assumes a price series driven by a business.
+
+    Every fixture here is a real instrument with its real fields, because
+    the whole point of this classifier is that the plausible-sounding
+    rules fail on real data: filtering on the margin requirement deletes
+    ordinary community banks, and matching the Nasdaq fifth letter turns
+    Alphabet's Class A into an Alphabet preferred.
+    """
+
+    def _inst(self, symbol, name, margin="0.5", fractionable=True, **kw):
+        base = {"symbol": symbol, "name": name, "status": "OC",
+                "exchange_code": "NSQ", "margin_requirement_long": margin,
+                "fractionable": fractionable, "etf_leveraged_factor": None,
+                "crypto_etf": None, "single_stock_etf": None}
+        base.update(kw)
+        return base
+
+    def _classify(self, instruments):
+        return universe.classify_security_types(instruments)
+
+    # --- preferreds by exchange notation -------------------------------
+
+    def test_the_pr_infix_marks_a_preferred(self):
+        got = self._classify([
+            self._inst("ARR", "ARMOUR RESIDENTIAL REIT INC"),
+            self._inst("ARR PRC", "ARMOUR RESIDENTIAL REIT INC", margin="1.0",
+                       fractionable=False),
+        ])
+        self.assertEqual(got["ARR"], "common")
+        self.assertEqual(got["ARR PRC"], "preferred")
+
+    def test_a_liquid_preferred_is_still_a_preferred(self):
+        """JPM's preferreds are marginable, so a tradability test alone
+        would wave them through. The notation has to stand on its own."""
+        got = self._classify([
+            self._inst("JPM", "JPMORGAN CHASE & CO"),
+            self._inst("JPM PRC", "JPMORGAN CHASE & CO", margin="0.5", fractionable=False),
+        ])
+        self.assertEqual(got["JPM PRC"], "preferred")
+
+    # --- preferreds by Nasdaq suffix -----------------------------------
+
+    def test_a_five_letter_sibling_on_full_margin_is_a_preferred(self):
+        got = self._classify([
+            self._inst("AGNC", "AGNC INVT CORP"),
+            self._inst("AGNCL", "AGNC INVT CORP", margin="1.0", fractionable=False),
+        ])
+        self.assertEqual(got["AGNCL"], "preferred")
+
+    def test_alphabet_class_a_is_not_an_alphabet_preferred(self):
+        """GOOGL matches the suffix pattern exactly and is common stock."""
+        got = self._classify([
+            self._inst("GOOG", "ALPHABET INC"),
+            self._inst("GOOGL", "ALPHABET INC"),
+        ])
+        self.assertEqual(got["GOOGL"], "common")
+
+    def test_share_class_suffixes_are_never_preferred(self):
+        got = self._classify([
+            self._inst("CENT", "CENTRAL GARDEN & PET CO"),
+            self._inst("CENTA", "CENTRAL GARDEN & PET CO", margin="1.0"),
+            self._inst("UONE", "URBAN ONE INC"),
+            self._inst("UONEK", "URBAN ONE INC", margin="1.0"),
+        ])
+        self.assertEqual(got["CENTA"], "common")
+        self.assertEqual(got["UONEK"], "common")
+
+    def test_a_five_letter_name_without_a_sibling_is_common(self):
+        got = self._classify([self._inst("CMCSA", "COMCAST CORP")])
+        self.assertEqual(got["CMCSA"], "common")
+
+    def test_a_shared_prefix_is_not_enough_without_a_shared_name(self):
+        """Otherwise any four-letter ticker captures unrelated five-letter
+        ones that happen to start the same way."""
+        got = self._classify([
+            self._inst("SAND", "SANDSTORM GOLD LTD"),
+            self._inst("SANDL", "SOME OTHER COMPANY INC", margin="1.0", fractionable=False),
+        ])
+        self.assertEqual(got["SANDL"], "common")
+
+    # --- the false positive that made margin unusable alone ------------
+
+    def test_an_illiquid_bank_on_full_margin_stays_common(self):
+        """GCBC, LARK, SBFG and ATLO are ordinary community banks that
+        carry a 100% margin requirement. They're precisely the small-cap
+        Stage 2 names this screener exists to surface, so a margin-based
+        filter would delete the tool's whole reason for existing."""
+        for symbol, name in (("GCBC", "GREENE COUNTY BANCORP INC"),
+                             ("LARK", "LANDMARK BANCORP INC"),
+                             ("ATLO", "AMES NATIONAL CORP")):
+            got = self._classify([self._inst(symbol, name, margin="1.0", fractionable=False)])
+            self.assertEqual(got[symbol], "common", f"{symbol} must survive")
+
+    # --- units, warrants, rights ---------------------------------------
+
+    def test_spac_units_and_warrants_are_separated_from_the_common(self):
+        got = self._classify([
+            self._inst("AACB", "ARTIUS II ACQUISITION INC"),
+            self._inst("AACBU", "ARTIUS II ACQUISITION INC", margin="1.0", fractionable=False),
+            self._inst("AACBW", "ARTIUS II ACQUISITION INC", margin="1.0", fractionable=False),
+            self._inst("AACBR", "ARTIUS II ACQUISITION INC", margin="1.0", fractionable=False),
+        ])
+        self.assertEqual(got["AACB"], "common")
+        self.assertEqual(got["AACBU"], "unit")
+        self.assertEqual(got["AACBW"], "warrant")
+        self.assertEqual(got["AACBR"], "right")
+
+    # --- funds ----------------------------------------------------------
+
+    def test_a_closed_end_fund_is_classified_as_a_fund(self):
+        """RVT leaves etf_leveraged_factor empty but carries crypto_etf,
+        which is what separates a pooled product from a real company."""
+        got = self._classify([
+            self._inst("RVT", "Royce Small-Cap Trust", crypto_etf=False),
+        ])
+        self.assertEqual(got["RVT"], "fund")
+
+    def test_a_bank_with_trust_in_its_name_is_not_a_fund(self):
+        got = self._classify([self._inst("HTB", "HOMETRUST BANCSHARES INC")])
+        self.assertEqual(got["HTB"], "common")
+
+    def test_an_etf_is_a_fund(self):
+        got = self._classify([
+            self._inst("QQQ", "Invesco QQQ Trust", etf_leveraged_factor="0",
+                       crypto_etf=False, single_stock_etf=False),
+        ])
+        self.assertEqual(got["QQQ"], "fund")
+
+    # --- what a scan actually admits ------------------------------------
+
+    def test_only_common_is_screened_by_default(self):
+        self.assertEqual(universe.wanted_types(), {"common"})
+
+    def test_funds_and_non_common_are_separate_opt_ins(self):
+        self.assertEqual(universe.wanted_types(include_funds=True), {"common", "fund"})
+        self.assertNotIn("fund", universe.wanted_types(include_non_common=True))
+        self.assertIn("preferred", universe.wanted_types(include_non_common=True))

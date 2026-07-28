@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS universe_cache (
     exchange_code TEXT,
     status TEXT,
     is_fund BOOLEAN NOT NULL DEFAULT 0,
+    security_type TEXT,
     fetched_date TEXT NOT NULL
 );
 
@@ -108,7 +109,8 @@ _schema_ready_for = None
 # backtest_trades — is deliberately absent from this list and would need
 # a proper migration.
 _REBUILDABLE_CACHE_COLUMNS = {
-    "universe_cache": {"symbol", "name", "exchange_code", "status", "is_fund", "fetched_date"},
+    "universe_cache": {"symbol", "name", "exchange_code", "status", "is_fund",
+                       "security_type", "fetched_date"},
     "sector_cache": {"ticker", "sector", "fetched_date"},
 }
 
@@ -320,25 +322,29 @@ def get_cached_universe():
     return [dict(r) for r in rows]
 
 
-def cache_universe(instruments, is_fund=None):
+def cache_universe(instruments, security_types=None):
     """Replaces the cached universe wholesale — a partial refresh would
     leave delisted names behind.
 
-    :param is_fund: optional predicate marking pooled products, so a scan
-        can exclude them without re-deriving the classification from the
-        raw instrument records it no longer has.
+    :param security_types: optional {symbol: type} map, so a scan can
+        exclude preferreds, units and funds without re-deriving the
+        classification from raw instrument records it no longer has.
+        Classification is relational — a symbol is a preferred because a
+        sibling exists — so it can't be recomputed one row at a time.
     """
     today = datetime.date.today().isoformat()
+    security_types = security_types or {}
     conn = _connect()
     try:
         conn.execute("DELETE FROM universe_cache")
         conn.executemany(
             "INSERT OR REPLACE INTO universe_cache "
-            "(symbol, name, exchange_code, status, is_fund, fetched_date) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "(symbol, name, exchange_code, status, is_fund, security_type, fetched_date) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             [
                 (i.get("symbol"), i.get("name"), i.get("exchange_code"), i.get("status"),
-                 bool(is_fund(i)) if is_fund else False, today)
+                 security_types.get(i.get("symbol")) == "fund",
+                 security_types.get(i.get("symbol")), today)
                 for i in instruments
                 if i.get("symbol")
             ],

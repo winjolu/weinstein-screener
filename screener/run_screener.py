@@ -171,7 +171,7 @@ def _looks_like_short_candidate(row):
 
 
 def _process_universe(run_date, index_bars, limit=None, min_dollar_volume=None,
-                       include_funds=False):
+                       include_funds=False, include_non_common=False):
     """Screens the whole tradable universe rather than a list I wrote.
 
     Shaped as a funnel because the costs are wildly uneven. Discovery and
@@ -180,7 +180,8 @@ def _process_universe(run_date, index_bars, limit=None, min_dollar_volume=None,
     so it goes last, applied to the few hundred names that could still
     qualify rather than the few thousand that can't.
     """
-    symbols = universe.get_universe(include_funds=include_funds)
+    symbols = universe.get_universe(include_funds=include_funds,
+                                    include_non_common=include_non_common)
     if limit:
         symbols = symbols[:limit]
         print(f"--limit: screening the first {len(symbols)} symbols only")
@@ -395,9 +396,16 @@ def _parse_args():
     )
     parser.add_argument(
         "--include-funds", action="store_true",
-        help="Also screen ETFs and similar pooled products, which a --universe "
-             "scan skips by default because they crowd out individual stocks and "
-             "carry no sector classification.",
+        help="Also screen ETFs, closed-end funds and similar pooled products, "
+             "which a --universe scan skips by default because they crowd out "
+             "individual stocks and carry no sector classification.",
+    )
+    parser.add_argument(
+        "--include-non-common", action="store_true",
+        help="Also screen preferred shares, SPAC units, warrants and rights. "
+             "Off by default: these pass the checklist for the wrong reasons, "
+             "since their price is driven by rates or a pending deal rather "
+             "than by a business. Provided so the exclusion can be measured.",
     )
     return parser.parse_args()
 
@@ -418,6 +426,7 @@ def main():
             run_date, index_bars, limit=args.limit,
             min_dollar_volume=args.min_dollar_volume,
             include_funds=args.include_funds,
+            include_non_common=args.include_non_common,
         )
     else:
         if args.broad:

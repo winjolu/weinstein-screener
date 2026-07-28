@@ -15,6 +15,34 @@ whereas a list of intentions needs pruning to stay honest.
 
 ## [Unreleased]
 
+### Fixed
+- The universe was screening instruments that stage analysis doesn't
+  apply to, and they were topping the list. Preferred shares inherit
+  their parent's sector and drift narrowly above a rising average, so
+  the checklist passed them for entirely the wrong reasons — `AGNCL`,
+  `AGNCO` and `ADAML` all scored 9 of 9, the highest in the market.
+  Closed-end funds got in too, because the fund test keyed on a field
+  only ETFs populate. `classify_security_types` now sorts the universe
+  into common, fund, preferred, unit, warrant and right, and a scan
+  takes common stock only. 10,163 screenable instruments resolve to
+  5,816 common, 3,702 fund, 449 preferred and 196 unit; the actionable
+  list went from 309 names to 234, and every one of those is now common
+  stock carrying a real sector.
+
+  Two conventions do the work and they needed different handling. The
+  ` PR<letter>` notation is unambiguous, and my first attempt to
+  corroborate it against a 100% margin requirement wrongly rescued 24
+  genuine preferreds like `JPM PRC` that are liquid enough to be
+  marginable. The five-letter Nasdaq suffix is the opposite case: it
+  needs that corroboration, or `GOOGL` classifies as an Alphabet
+  preferred.
+
+  What I didn't use is the margin requirement on its own, which was my
+  first idea and is wrong in the expensive direction: `GCBC`, `LARK`,
+  `SBFG` and `ATLO` are ordinary community banks that also carry 100%
+  margin, and they're exactly the small-cap Stage 2 names the screener
+  exists to surface. Filtering on it would have deleted them silently.
+
 ### Added
 - A reporting layer, `screener/report.py`, for reading back what a scan
   already found. The scan stores a full condition breakdown for every
