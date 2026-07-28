@@ -158,3 +158,91 @@ class BatchSplitsAroundBadSymbolsTest(unittest.TestCase):
         out = {}
         data_fetch._fetch_chunk(self._FakeClient(md), ["A", "B"], 104, True, out)
         self.assertEqual(out, {})
+
+
+class BarCountCapTest(unittest.TestCase):
+    """The server refuses any count above 1200 outright rather than
+    truncating, and the refusal used to be swallowed.
+
+    This mattered far more than a rejected request normally would.
+    run_backtest asks for enough daily bars to span the whole test
+    window, so any backtest starting more than about 3.3 years back threw
+    on every sector fetch, hit a bare `except`, and ran the entire test
+    with condition 5 unresolved at every checkpoint — indistinguishable
+    in the output from a normal run.
+    """
+
+    def test_a_request_within_the_cap_is_untouched(self):
+        self.assertEqual(data_fetch._capped(104, "weekly"), 104)
+        self.assertEqual(data_fetch._capped(data_fetch.MAX_BARS_PER_REQUEST, "weekly"),
+                         data_fetch.MAX_BARS_PER_REQUEST)
+
+    def test_an_oversized_request_is_clamped_rather_than_refused(self):
+        self.assertEqual(data_fetch._capped(1532, "daily", "SPY"),
+                         data_fetch.MAX_BARS_PER_REQUEST)
+
+    def test_clamping_says_so(self):
+        """Silent truncation would be its own version of this bug: the
+        early checkpoints would resolve differently with no indication."""
+        import contextlib, io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            data_fetch._capped(5000, "daily", "XLK")
+        out = buf.getvalue()
+        self.assertIn("5000", out)
+        self.assertIn(str(data_fetch.MAX_BARS_PER_REQUEST), out)
+        self.assertIn("XLK", out)
+
+    def test_no_warning_when_nothing_is_truncated(self):
+        import contextlib, io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            data_fetch._capped(300, "weekly", "AAPL")
+        self.assertEqual(buf.getvalue(), "")
+
+
+class DailyBarCacheTest(unittest.TestCase):
+    """A backtest asks for sector data once per ticker, and every one of
+    those asks refetched the identical SPY series — a third of the API
+    budget spent on data already in hand."""
+
+    def setUp(self):
+        self._prev = dict(data_fetch._daily_bar_cache)
+        data_fetch._daily_bar_cache.clear()
+        self.calls = []
+
+    def tearDown(self):
+        data_fetch._daily_bar_cache.clear()
+        data_fetch._daily_bar_cache.update(self._prev)
+
+    def _patch(self):
+        original = data_fetch.get_daily_bars
+
+        def fake(symbol, category, lookback_days):
+            self.calls.append((symbol, category, lookback_days))
+            return [{"time": "2024-01-02T00:00:00.000+0000", "close": 1.0}]
+
+        data_fetch.get_daily_bars = fake
+        self.addCleanup(lambda: setattr(data_fetch, "get_daily_bars", original))
+
+    def test_a_repeated_request_is_served_from_memory(self):
+        self._patch()
+        for _ in range(5):
+            data_fetch._cached_daily_bars("SPY", "US_ETF", 1200)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_a_different_symbol_or_lookback_is_fetched_separately(self):
+        """Sharing a cache entry across lookbacks would hand back a
+        series that is the wrong length for the caller's window."""
+        self._patch()
+        data_fetch._cached_daily_bars("SPY", "US_ETF", 1200)
+        data_fetch._cached_daily_bars("XLK", "US_ETF", 1200)
+        data_fetch._cached_daily_bars("SPY", "US_ETF", 600)
+        self.assertEqual(len(self.calls), 3)
+
+    def test_the_cached_value_is_what_the_fetch_returned(self):
+        self._patch()
+        first = data_fetch._cached_daily_bars("SPY", "US_ETF", 1200)
+        second = data_fetch._cached_daily_bars("SPY", "US_ETF", 1200)
+        self.assertEqual(first, second)
+        self.assertEqual(first[0]["close"], 1.0)
