@@ -20,12 +20,36 @@ testing it against the book's worked example caught a real error, so
 reasoning alone has a poor track record here. A false negative in this
 function is invisible: the ticker simply never appears.
 
-**The fund/stock discriminator is only partly validated.** `is_fund`
-keys on ETF-specific fields being populated, which I checked in aggregate
-against fund-like names: 3,338 agreed, 16 didn't. I never inspected the
-16, nor the 343 unflagged instruments whose names *do* look fund-like — I
-assumed those are REITs and trusts. If the field is ever populated for an
-ordinary company, that stock vanishes from the universe silently.
+**The universe admits instruments that stage analysis doesn't apply to,
+and they dominate the shortlist.** This was the "only partly validated"
+fund discriminator note, and reading a scan back through the new report
+turned the open question into a measured one. Roughly a quarter of the
+309 actionable names on the 2026-07-27 scan are not common stock:
+
+- **Preferred shares and baby bonds** (~35 names). `is_fund` doesn't
+  address these at all — they're not funds. They inherit the parent
+  company's sector, so `AGNCL`, `AGNCO` and `ADAML` all score 9 of 9 and
+  rank at the very top of the list. They shouldn't: a fixed-rate
+  instrument oscillating narrowly above its 30-week average isn't a
+  Stage 2 advance, it's an interest-rate product, and every condition
+  the checklist tests reads as a pass for the wrong reason.
+- **Closed-end funds** (~46 names: `RVT`, `KYN`, `RQI`, `RIV`, `ECAT`,
+  and others). `is_fund` keys on `etf_leveraged_factor` being populated,
+  which is ETF-specific, so CEFs come back `is_fund = 0` and survive even
+  a fund-excluding run. This is exactly the 343 unflagged fund-like names
+  I'd assumed were REITs and trusts — the assumption was wrong.
+
+The two failure directions aren't symmetric. A wrongly excluded stock
+vanishes silently; these are wrongly *included*, which is visible but
+puts three preferreds at the head of the list I'd work through first.
+Fixing it needs a security-type test rather than a name-pattern one,
+since `HTB` (HomeTrust Bancshares) is an ordinary bank that any
+"Trust in the name" heuristic would throw out.
+
+**The reverse direction is still unchecked.** 16 instruments disagreed
+with `is_fund` in the original aggregate check and I never inspected
+them. If the ETF field is ever populated for an ordinary company, that
+stock disappears from the universe with no trace.
 
 **Positional pairing of daily series.** Relative strength now pairs stock
 and index by date, but the sector-ETF and SPY daily closes feeding
@@ -74,8 +98,11 @@ threshold from data than invent another number.
 **No stage-transition history.** A universe scan stores only the names
 that could qualify, so there's no record of a stock crossing from Stage 1
 into Stage 2 over successive weeks — which is exactly the transition the
-method is built to catch. Storing all ~6,800 evaluations weekly would fix
-it at a cost in database size.
+method is built to catch. `report --diff` now surfaces the crossings it
+*can* see, but it can only compare names that cleared the prefilter in
+both scans, so a stock crossing into Stage 2 for the first time tends to
+appear as an arrival rather than as a transition. Storing all ~6,800
+evaluations weekly would fix it at a cost in database size.
 
 ## Measurement limitations
 
@@ -98,6 +125,13 @@ own:
 - **`--limit` takes a prefix, not a sample**, so a limited universe run
   is not representative of the market. Fine for smoke tests, misleading
   for anything else, and the help text doesn't say so.
+- **`report --diff` can't tell a market change from a scope change.** It
+  compares two stored scans without knowing what arguments produced
+  them, so diffing a `--limit`ed run against a full one reports the
+  difference in coverage as names entering and leaving. The 07-26/07-27
+  pair shows this: 85 arrivals and no departures, which is a wider scan
+  rather than a market event. The scan doesn't record its own arguments,
+  which is what would fix it.
 - **Whether thin names *perform* as well is untested.** The liquidity
   floor now sits where data integrity breaks, and names reach the
   prefilter at the same rate regardless of liquidity — but qualifying at
