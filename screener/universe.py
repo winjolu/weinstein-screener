@@ -14,9 +14,19 @@ real candidates, whose weekly bars cost ~160 batched calls. A full-market
 sweep therefore fits comfortably inside a 300-per-minute budget — the
 constraint was never the quota, it was fetching one symbol at a time.
 """
+import re
+
 from webull.data.common.category import Category
 
 from . import data_fetch, db, rate_limit
+
+# `ABR PRD`, `JPM PRC`, `NLY PRF` — the exchange's own preferred-share
+# notation, and the one part of this that needs no corroboration.
+PREFERRED_SYMBOL_RE = re.compile(r"\s+PR[A-Z]?$")
+
+# Trailing letters that mark a derivative of the common rather than the
+# common itself, where the four-letter base exists under the same name.
+DERIVATIVE_SUFFIXES = {"U": "unit", "W": "warrant", "R": "right"}
 
 INSTRUMENTS_PER_PAGE = 1000
 
@@ -93,23 +103,120 @@ def fetch_all_instruments():
     return out
 
 
+# The ETF-family fields. None of them is a security-type label, but the
+# API populates them for pooled products and leaves them absent entirely
+# for ordinary shares, which makes their mere presence the signal.
+ETF_FIELDS = ("etf_leveraged_factor", "single_stock_etf", "crypto_etf")
+
+# Nasdaq's fifth-letter convention distinguishes share classes from
+# preferreds and notes, but not cleanly enough to use alone. These are
+# the letters that mean "another class of common" — Central Garden's
+# CENTA, Liberty Latin America's LILAK, Urban One's UONEK.
+COMMON_CLASS_SUFFIXES = frozenset("ABCK")
+
+# Everything a stage analysis can legitimately be run on. The rest are
+# instruments whose price series answers a different question.
+DEFAULT_SCREENABLE_TYPES = frozenset({"common"})
+
+
 def is_fund(instrument):
-    """True for ETFs, ETNs and similar pooled products, as opposed to
-    common stock.
+    """True for pooled products — ETFs, ETNs, closed-end funds — as
+    opposed to common stock.
 
     The API doesn't label these directly, but it does carry ETF-specific
-    fields — leverage factor, single-stock flag, crypto flag — and those
-    are populated for pooled products and absent entirely for ordinary
-    shares. Checked across the whole screenable set: 3,338 instruments
-    flagged this way have fund-like names against 16 that don't, so the
-    signal is sound.
+    fields, and those are populated for pooled products and absent
+    entirely for ordinary shares. I check the field rather than the name
+    deliberately: matching words like "Trust" or "Shares" misclassifies
+    real companies, since plenty of REITs are trusts and HomeTrust
+    Bancshares is a bank.
 
-    I check the field rather than the name deliberately. Matching on
-    words like "Trust" or "Shares" misclassifies real companies — plenty
-    of REITs are trusts — and that showed up as 343 disagreements where
-    the field is the one telling the truth.
+    This used to test `etf_leveraged_factor` alone, which turned out to
+    be ETF-specific rather than fund-generic — closed-end funds leave it
+    empty and so came back as ordinary stock. `crypto_etf` is the one
+    that separates them: it's present-but-false on a CEF and absent on a
+    real company. Widening the test to "any of the three is populated"
+    picks up 346 further names, and every one I inspected is a closed-end
+    fund. Those are the 343 unflagged fund-like names I'd previously
+    assumed were REITs and trusts; the assumption was wrong.
     """
-    return instrument.get("etf_leveraged_factor") is not None
+    return any(instrument.get(field) is not None for field in ETF_FIELDS)
+
+
+def _margin_requirement(instrument):
+    try:
+        return float(instrument.get("margin_requirement_long") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def classify_security_types(instruments):
+    """Maps each symbol to what kind of instrument it actually is.
+
+    Returns one of: common, fund, preferred, unit, warrant, right.
+
+    Stage analysis assumes a price series driven by a business's
+    prospects. A preferred share is driven by interest rates, a SPAC unit
+    by a pending deal, a warrant by the leverage in its strike. All three
+    still produce a rising line above a rising average, so the checklist
+    passes them for entirely the wrong reasons — measured on one scan,
+    the three top-scoring names in the entire market were AGNC preferreds
+    at 9 of 9.
+
+    Classification can't be done per-instrument, because the signal is
+    relational: `AGNCL` is a preferred because `AGNC` exists under the
+    same company name. So this takes the whole list at once.
+
+    Two conventions do the work, and they need different treatment:
+
+    - The ` PR<letter>` symbol infix is an unambiguous exchange
+      convention for preferred shares, so it stands on its own. I
+      initially demanded a tradability confirmation here too and it was
+      a mistake: large-cap preferreds like `JPM PRC` are liquid enough
+      to be marginable, so requiring a 100% margin rate wrongly rescued
+      24 genuine preferreds.
+    - The five-letter Nasdaq suffix is genuinely ambiguous — `GOOGL` is
+      Alphabet's Class A, not an Alphabet preferred. There I take the
+      structural match as a candidate only, and confirm it against how
+      the instrument trades, since preferreds and notes carry a 100%
+      margin requirement where ordinary shares don't.
+
+    What I deliberately don't use is the margin requirement on its own.
+    It tracks illiquidity rather than security type: `GCBC`, `LARK`,
+    `SBFG` and `ATLO` are ordinary community banks that also carry 100%
+    margin, and they're exactly the small-cap Stage 2 names this screener
+    exists to surface. Filtering on it would delete them silently.
+    """
+    by_symbol = {i.get("symbol"): i for i in instruments if i.get("symbol")}
+    by_name = {}
+    for instrument in instruments:
+        name = (instrument.get("name") or "").strip().upper()
+        by_name.setdefault(name, set()).add(instrument.get("symbol"))
+
+    types = {}
+    for symbol, instrument in by_symbol.items():
+        types[symbol] = _security_type(instrument, symbol, by_symbol, by_name)
+    return types
+
+
+def _security_type(instrument, symbol, by_symbol, by_name):
+    if PREFERRED_SYMBOL_RE.search(symbol):
+        return "preferred"
+
+    if len(symbol) == 5 and symbol.isalpha():
+        base, suffix = symbol[:-1], symbol[-1]
+        name = (instrument.get("name") or "").strip().upper()
+        # The sibling has to share a company name, not merely a prefix,
+        # or any four-letter ticker would capture unrelated five-letter
+        # ones that happen to start the same way.
+        if base in by_symbol and base in by_name.get(name, ()):
+            if suffix in DERIVATIVE_SUFFIXES:
+                return DERIVATIVE_SUFFIXES[suffix]
+            if suffix not in COMMON_CLASS_SUFFIXES and _margin_requirement(instrument) >= 1.0:
+                return "preferred"
+
+    if is_fund(instrument):
+        return "fund"
+    return "common"
 
 
 def is_screenable(instrument):
@@ -130,38 +237,63 @@ def is_screenable(instrument):
     return True
 
 
-def get_universe(refresh=False, include_funds=False):
+def wanted_types(include_funds=False, include_non_common=False):
+    """Which security types a scan should admit."""
+    types = set(DEFAULT_SCREENABLE_TYPES)
+    if include_funds:
+        types.add("fund")
+    if include_non_common:
+        types.update({"preferred", "unit", "warrant", "right"})
+    return types
+
+
+def get_universe(refresh=False, include_funds=False, include_non_common=False):
     """The screenable universe as a list of symbols, cached for a week.
 
     Listings change slowly, so re-paginating the whole instrument list on
     every run buys nothing.
 
-    Funds are excluded by default. They aren't invalid subjects for stage
-    analysis — the book applies it to sector funds explicitly — but they
-    swamp a stock screen in practice. A first limited run came back
-    almost entirely ETFs, several of them slices of the same sector
-    firing together as if they were independent signals, and none of them
-    carry an industry classification, so condition 5 can never resolve
-    and they're capped below a full verdict. Pass include_funds=True to
-    screen them anyway.
+    Only common stock is screened by default.
+
+    Funds are the softer exclusion of the two. They aren't invalid
+    subjects for stage analysis — the book applies it to sector funds
+    explicitly — but they swamp a stock screen in practice. A first
+    limited run came back almost entirely ETFs, several of them slices of
+    the same sector firing together as if they were independent signals,
+    and none carry an industry classification, so condition 5 can never
+    resolve. `include_funds=True` screens them anyway.
+
+    Preferreds, units, warrants and rights are excluded on a stronger
+    argument: the checklist doesn't merely struggle with them, it passes
+    them for the wrong reasons. `include_non_common=True` exists so the
+    exclusion can be measured rather than trusted, not because screening
+    them is a sensible default.
     """
+    types = wanted_types(include_funds, include_non_common)
+
     if not refresh:
         cached = db.get_cached_universe()
         if cached:
-            rows = cached if include_funds else [r for r in cached if not r["is_fund"]]
-            return [row["symbol"] for row in rows]
+            # A cache written before security types existed has the column
+            # empty; treating that as "unknown, so keep it" would silently
+            # restore the old behaviour, so an untyped cache is refetched.
+            if any(row.get("security_type") for row in cached):
+                return [r["symbol"] for r in cached if r.get("security_type") in types]
 
     instruments = fetch_all_instruments()
     screenable = [i for i in instruments if is_screenable(i)]
-    db.cache_universe(screenable, is_fund=is_fund)
+    security_types = classify_security_types(screenable)
+    db.cache_universe(screenable, security_types=security_types)
 
-    funds = sum(1 for i in screenable if is_fund(i))
+    counts = {}
+    for value in security_types.values():
+        counts[value] = counts.get(value, 0) + 1
+    breakdown = ", ".join(f"{n} {t}" for t, n in sorted(counts.items(), key=lambda kv: -kv[1]))
     print(
         f"universe: {len(instruments)} instruments -> {len(screenable)} screenable "
-        f"({len(screenable) - funds} stocks, {funds} funds)"
+        f"({breakdown})"
     )
-    selected = screenable if include_funds else [i for i in screenable if not is_fund(i)]
-    return [i["symbol"] for i in selected if i.get("symbol")]
+    return [s for s, t in sorted(security_types.items()) if t in types]
 
 
 def filter_by_liquidity(bars_by_symbol, min_dollar_volume=MIN_AVG_WEEKLY_DOLLAR_VOLUME, report=True):
