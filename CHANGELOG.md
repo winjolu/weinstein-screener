@@ -15,7 +15,31 @@ whereas a list of intentions needs pruning to stay honest.
 
 ## [Unreleased]
 
+### Added
+- `portfolio_sim.py`, which turns a list of simulated trades into what an
+  account would have done: a fixed stake into every signal, tracked over
+  a calendar, reported as a yearly rate against simply buying the index.
+  Trade statistics answer "was each signal good" and that turns out to be
+  a different question from "should I run this," because a respectable
+  average trade says nothing about how long money was committed or how
+  much of it sat idle. Reports return on both peak and average capital,
+  since peak alone is unfairly harsh and average alone is unachievable.
+- `docs/what-testing-can-show.md` — the four ways a backtest lies, in
+  plain terms, and which of them this project has actually closed off.
+
 ### Fixed
+- Any backtest starting more than about 3.3 years back ran with condition
+  5 unresolved at every single checkpoint. `run_backtest` sizes its daily
+  sector request to span the whole test window, the server refuses any
+  count above 1200 outright rather than truncating, and a bare `except`
+  swallowed the refusal — so the run completed, produced trades, and
+  looked exactly like a good one. Every count is now clamped and says so.
+  I had the 1200 cap written down in the API reference already; knowing a
+  limit and enforcing it turn out to be different things.
+- Sector data was refetched per ticker during a backtest, so a 200-ticker
+  run spent 200 identical requests on the same SPY daily series — about a
+  third of its API budget and a third of its wall-clock time on data it
+  already had. Memoised for the life of the process.
 - The universe was screening instruments that stage analysis doesn't
   apply to, and they were topping the list. Preferred shares inherit
   their parent's sector and drift narrowly above a rising average, so
@@ -71,6 +95,105 @@ whereas a list of intentions needs pruning to stay honest.
   unaffected, since those checkpoints could never have produced trades.
 
 ### Investigated, no change made
+- **The method sits out crashes exactly as advertised, and still loses
+  to buying the index.** Two windows over 100 mid-cap-or-larger names,
+  every signal taken, $1,000 a trade.
+
+  | | 2015-2026 | 2005-2026 |
+  |---|---|---|
+  | trades | 273 | 373 |
+  | win rate | 38.8% | 38.1% |
+  | per trade | +1.00% | +1.72% |
+  | account, per year | +0.9% to +2.4% | +1.2% to +3.3% |
+  | SPY, per year | +12.4% | +10.4% |
+
+  Condition 6 is vindicated and it's the clearest success here. The
+  index spent 64 weeks below its 30-week average during the 2008
+  decline; the method took one trade in that entire 18-month stretch out
+  of 395. Across 21 years only 3.0% of entries happened with the index
+  below its average, and worst equity drawdown was −9.7% against the
+  index's −54.6%.
+
+  What it costs is the rest of the result. Money sits in the market
+  about 29% of the time, so the strategy behaves like a mostly-cash
+  portfolio: small drawdown, and a return that over 2005-2026 is roughly
+  what short-term treasuries paid, while carrying real equity risk.
+
+  Profit is also concentrated past the point of meaning anything. Over
+  2015-2026 the three best trades produced $2,657 of $2,729 total, so
+  the remaining 270 trades made $72 between them; excluding the top
+  five, the other 268 lost $1,102. Bootstrapping 100-trade runs out of
+  that population, 27% of them lose money outright and the 5th-95th
+  percentile range crosses zero — a hundred trades cannot distinguish
+  this from luck.
+
+  Standing caveats still apply and all point the same way: survivorship
+  bias flatters these numbers, and the daily-bar cap meant condition 5
+  was unresolved before ~2021, so most of both windows tested an
+  eight-condition checklist rather than the current nine.
+- **Partial profit-taking, settled properly this time — it's a wash, so
+  the book's rule stays.** The earlier reading rested on ten trades that
+  reached the target; this one has 83, and compares them pairwise rather
+  than comparing arm averages, since 151 of the 254 trades never reach
+  the target and are byte-identical across arms. Among the trades where
+  the policy actually applies: selling everything at the target returns
+  +19.83% a trade, selling half +19.18%, selling nothing +18.53%.
+
+  Selling everything wins on 66% of individual trades, which reads like
+  a result until the spread is accounted for — the mean gap over selling
+  half is 0.4 standard errors from zero, i.e. indistinguishable from
+  noise. The mechanism is visible in the medians (+17.92% against
+  +15.49%): selling everything wins more often, selling half wins bigger
+  when it wins, because the remaining half occasionally runs a long way.
+  That is exactly the trade partial profit-taking is meant to make, and
+  the two effects cancel.
+
+  So the default is unchanged, but for a better reason than before. It
+  was kept on the grounds that ten observations shouldn't overrule the
+  source method; it's now kept because eight times that sample can't
+  find a difference either.
+- **Segmented the backtest by liquidity, which closes a question open
+  since the floor was lowered — thin names are much worse, and stop
+  distance is why.** Five bands, 45 tickers each. The $1-5M band lost
+  15.14% a trade with 12 of 15 trades negative, and trimming both its
+  best and worst trade makes it worse rather than better, so it isn't
+  one disaster. Losses past −30% were 4 of 15 there against 0 of 55 in
+  the $200M+ band.
+
+  Every deep loser exited at or inside its planned risk, so the stop
+  isn't failing — the planned risk is simply enormous. The stop sits at
+  the consolidation low, and thin names consolidate raggedly, so the
+  median stop runs 37-41% below entry under $50M a week against 16.5%
+  above $200M. One stop-out therefore costs roughly 40% of the position
+  on a thin name, exactly as designed. The 15% stop ceiling doesn't stop
+  this, since failing condition 9 still leaves 7 of 8 others to qualify
+  on.
+
+  Also worth recording: no band showed a reliable edge. The $200M+ band
+  returns +4.20% a trade, but a single +242% winner is the whole of it —
+  trimmed, it's +0.18%, with 31 of 55 trades losing. Across all 167
+  trades the stratified sample returns −1.42%, against roughly +2.85%
+  for the liquid 198-ticker samples I'd been measuring on. The method's
+  positive results have been coming from liquid names.
+- **Swept the book trailing stop's confirmation threshold, and my value
+  was badly wrong — though the conclusion it supported still holds.**
+  `CORRECTION_RECOVERY_PCT` decides how near its old high a stock must
+  climb before the correction-based stop may move up. At my 3.0 the
+  method returns −2.06% a trade; loosening it to 20 gives +1.26%. The
+  reason is visible in how trades ended: at a 1% threshold 44.6% of
+  positions never resolve at all, falling to 7.5% at 20%, because a stop
+  that may not move is a stop that never closes anything. That is
+  exactly the symptom I'd recorded without being able to explain.
+
+  It doesn't rescue the method. The 30-week average returns +2.85% a
+  trade over the same 198 tickers, so it stays the default and the
+  earlier finding is unchanged — only its explanation is better.
+
+  Left at 3.0 rather than retuned. Performance rises monotonically right
+  up to a threshold so permissive the rule barely does anything, and a
+  gate that works better the less it gates is an argument against the
+  gate, not for a particular number. Picking the sweep's favourite would
+  be fitting to one window. Recorded in known-gaps as a decision owed.
 - **The book's trailing rule performs worse than following the average.**
   Across 200 tickers and roughly 220 resolved trades an arm: the 30-week
   average returns +2.86% a trade at a 2.24 payoff, swing lows −0.58%,

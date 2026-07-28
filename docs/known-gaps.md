@@ -70,17 +70,23 @@ though its placement principle does. Written up in
 [parameter-calibration.md](parameter-calibration.md); recorded here only
 so it doesn't get reopened as though it were still unexplained.
 
-**The book's trailing rule is implemented but underperforms mine.**
-Chased as the explanation for partial profit-taking failing, and it
-isn't one: measured over 200 tickers, following the 30-week average
-returns +2.86% a trade against −2.99% for the book's correction-based
-rule. The rule is available as `trailing_method='book'` and stays there
-because the failure is likely mine rather than the method's — the
-confirmation threshold that decides when the stop may move is a number
-I invented to operationalise "rallies back close to its prior peak",
-and too strict a value produces precisely the symptom observed, which
-is a stop that almost never moves. Worth revisiting by sweeping that
-threshold rather than by rereading the book. See
+**`CORRECTION_RECOVERY_PCT = 3.0` is known-bad and awaiting a decision.**
+The sweep is done and it confirmed the guess: 3.0 is far too strict, and
+the book's trailing rule improves from −2.06% to +1.26% a trade as the
+threshold loosens. At 1% nearly half of all positions never resolve,
+because the stop can't move until the stock is within 1% of its old
+high. The rule still loses to the 30-week average (+2.85%) even at its
+best, so the default is unaffected — but the constant is left at a value
+now known to be wrong, on a non-default code path, which is a trap for
+whoever reads it next.
+
+The decision it's waiting on isn't "what number": performance improves
+monotonically all the way to a threshold so loose it barely constrains
+anything, which argues the confirmation gate itself is the problem
+rather than its calibration. Either set it to ~10%, which is at least
+coherent with the 8-10% correction the rule already requires, or remove
+the confirmation step and re-measure. Retuning it to the sweep's
+favourite would be fitting the number to one window. See
 [parameter-calibration.md](parameter-calibration.md).
 
 **The short-side checklist.** Only a heuristic pointer exists in the
@@ -106,14 +112,39 @@ evaluations weekly would fix it at a cost in database size.
 
 ## Measurement limitations
 
+**Condition 5 can only resolve for the last ~4.8 years of any backtest.**
+Sector strength is computed from daily bars, the server caps any request
+at 1200 of them, and there is no paging parameter to reach further back.
+So a test spanning 2015-2026 is running an eight-condition checklist for
+its first six years and a nine-condition one after that. The two halves
+aren't the same strategy, which limits what a long-window result can say
+about the method as it currently stands.
+
+**But condition 6 is not affected, and that's the one that matters most
+for a long test.** The market-stage read comes from weekly index closes,
+which reach back 23 years, so the claim the whole method rests on —
+that it keeps you out of a Stage 4 market — is fully testable against
+2008 even though sector strength isn't. A long-window result should
+therefore be read as strong evidence about crash behaviour and weak
+evidence about the checklist as currently configured.
+
 Backtest figures carry caveats that no amount of code will fix on their
 own:
 
 - Trades cluster heavily — five tickers made up roughly half of both
-  samples measured so far.
-- Every window tested sits inside a bull market. Condition 6 exists to
-  keep you out of a Stage 4 market and has never been exercised against
-  one.
+  samples measured so far. Worse on the long window: of 273 trades over
+  2015-2026, the top three produced $2,657 of $2,729 total profit, so
+  the other 270 made $72 between them.
+- ~~Every window tested sits inside a bull market.~~ **Condition 6 has
+  now been exercised against a real Stage 4 market and it works.** Over
+  2005-2026 the index spent 64 weeks below its 30-week average inside
+  the 2008 decline, and the method entered exactly one trade in that
+  18-month window out of 395 total. Across the whole 21 years only 3.0%
+  of entries occurred with the index below its average. Worst equity
+  drawdown was −9.7% against the index's −54.6%. The crash-avoidance
+  claim is validated; what remains unvalidated is whether avoiding
+  crashes at this cost is worthwhile, since the same runs return
+  +1.2-3.3% a year against the index's +10.4%.
 - The universe is current listings only, so anything delisted is absent
   and results are survivorship-biased.
 - Median R is negative in both samples: the typical trade is a small loss
@@ -132,11 +163,47 @@ own:
   pair shows this: 85 arrivals and no departures, which is a wider scan
   rather than a market event. The scan doesn't record its own arguments,
   which is what would fix it.
-- **Whether thin names *perform* as well is untested.** The liquidity
-  floor now sits where data integrity breaks, and names reach the
-  prefilter at the same rate regardless of liquidity — but qualifying at
-  the same rate isn't the same as working out as well, and the backtest
-  has never been segmented by liquidity to check.
+- **Thin names perform much worse, and the reason is stop distance.**
+  Measured 2026-07-28 across five liquidity bands, 45 tickers each. The
+  $1-5M band returned −15.14% a trade with 12 of 15 trades losing;
+  trimming both the best and worst trade makes it *worse* (−18.05%), so
+  it's a bad population rather than one disaster. Deep losses past −30%
+  were 4 of 15 in the thinnest band and 0 of 55 in the largest.
+
+  The mechanism is not the stop failing — every deep loser exited at or
+  inside its planned risk. It's that the planned risk was enormous to
+  begin with, because the stop goes at the consolidation low and thin
+  names consolidate raggedly:
+
+  | band | median stop distance below entry |
+  |---|---|
+  | $1-5M | 37.1% |
+  | $5-15M | 41.2% |
+  | $15-50M | 36.5% |
+  | $50-200M | 25.3% |
+  | $200M+ | 16.5% |
+
+  So a single stop-out on a thin name costs ~40% of the position, by
+  design. `MAX_SENSIBLE_STOP_PCT = 15` does not prevent this: it fails
+  condition 9 and nothing more, so a setup with a 40% stop still
+  qualifies on 7 of the remaining 8 conditions. **The open question is
+  now whether that ceiling should be a hard gate rather than one
+  condition of nine** — see [parameter-calibration.md](parameter-calibration.md),
+  where the ceiling's placement was decided on a different argument.
+
+  The $1M floor itself is not the thing to change: it was set where data
+  integrity breaks and that reasoning still holds. This is a separate,
+  higher floor for *tradability*, or a gate on stop distance, and I'd
+  rather fix the risk directly than proxy it through liquidity.
+
+- **No liquidity band showed a reliable edge**, including the largest.
+  $200M+ returned +4.20% a trade, but trimming its best and worst trade
+  drops it to +0.18% — a single +242% winner is the entire result, and
+  31 of its 55 trades lost money. Across all 167 trades in the
+  stratified sample the method returned −1.42% a trade. That is a
+  different sample from the 198-ticker runs that return around +2.85%,
+  and the difference is itself informative: those samples are liquid,
+  and the method's positive results have been coming from liquid names.
 - **`historical_levels` mislabels its windows.** On weekly bars, "5D" is
   a single bar and "all_time" means "as far back as the evaluation window
   reaches", not all time.
