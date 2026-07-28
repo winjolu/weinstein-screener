@@ -183,6 +183,88 @@ win rate while hiding a genuinely better payoff profile. Anything
 concluded from a 29-trade sample in this project should be treated as a
 hint, and the 200-ticker harness takes about three minutes an arm.
 
+## PARTIAL_EXIT_FRACTION = 0.5 — measured properly, and it's a wash (2026-07-28)
+
+The book sells half the position at the swing-rule target. I'd measured
+this once on ten target-reaching trades, found selling everything looked
+better, and kept the book's half anyway on sample-size grounds.
+
+Re-measured on 254 trades across 198 tickers, of which 83 reach the
+target. Two things made this version worth trusting where the last
+wasn't. First, the sample: 83 against 10. Second, the comparison is
+paired — 151 of the 254 trades never reach the target and are identical
+in every arm, so comparing arm-level averages dilutes the real effect by
+roughly two-thirds. Comparing only the trades where the policy applies:
+
+| at the target | mean | median |
+|---|---|---|
+| sell everything | +19.83% | +17.92% |
+| sell half (the book) | +19.18% | +15.49% |
+| sell nothing, trail it all | +18.53% | +10.08% |
+
+Selling everything wins on 66% of individual trades. That looks decisive
+and isn't: the mean advantage over selling half is 0.65 points against a
+16.57-point spread, which is 0.4 standard errors from zero. The medians
+show why. Selling everything wins more often; selling half wins bigger
+when it wins, because the retained half occasionally runs a long way.
+Those are the two halves of the same trade-off and they cancel.
+
+**Unchanged, but for a better reason.** It was kept because ten
+observations shouldn't overrule the source. It's now kept because 83
+can't find a difference either — and where there's no measurable
+difference, the book's version is the one with reasoning behind it.
+
+Note the ordering is stable across all three arms and both statistics,
+which is worth something even without significance: nothing here suggests
+letting the whole position run is better, and that was the live
+hypothesis when the trailing stop was under suspicion.
+
+## CORRECTION_RECOVERY_PCT = 3.0 is wrong, and the rule around it may be too (2026-07-28)
+
+This is the number I invented to operationalise the book's "rallies back
+close to its prior peak" — how near the old high a stock must get before
+the correction-based trailing stop is allowed to move up. I flagged it
+in known-gaps as the likely reason the book's trailing method measured
+worse than simply following the 30-week average. Swept it across 198
+tickers, same window, ~250 trades an arm:
+
+| threshold | n | win | mean/trade | total R | never resolved |
+|---|---|---|---|---|---|
+| 1% | 102 | 27.5% | −6.28% | −30.1 | 44.6% |
+| **3% (default)** | 147 | 39.5% | **−2.06%** | −10.0 | 27.2% |
+| 6% | 187 | 41.7% | +0.11% | −3.1 | 16.9% |
+| 12% | 227 | 42.3% | +1.07% | +9.0 | 8.8% |
+| 20% | 236 | 41.5% | +1.26% | +9.2 | 7.5% |
+| *30-week average* | *238* | *44.5%* | *+2.85%* | *+24.0* | — |
+
+**The guess was right: 3.0 is far too strict**, and costs about 3.3
+points a trade against a loose setting. The last column is the
+mechanism and it's unambiguous — at 1% nearly half the positions never
+resolve at all, because a stock has to climb back to within 1% of its
+old high before the stop may move, and mostly it doesn't. The stop sits
+still and the trade never closes. That is precisely the symptom I
+recorded without being able to explain it.
+
+**But the more useful finding is the shape of the curve.** Performance
+improves monotonically as the threshold loosens, all the way to a value
+so permissive the rule barely constrains anything. A gate that works
+better the less it gates is evidence against the gate, not evidence for
+a particular setting. Retuning to 20% would be fitting the number to
+this window; the honest options are to set it at ~10%, which is at
+least coherent with the rule's own scale given it requires an 8-10%
+correction first, or to drop the confirmation requirement and re-measure
+the method without it.
+
+**Left at 3.0 pending that decision**, since `trailing_method='book'` is
+not the default and nothing is exposed while it waits. Recording the
+number as known-bad rather than silently retuning it to the value this
+particular sweep preferred.
+
+**What doesn't change:** the 30-week average still wins clearly, at
++2.85% against +1.26% for the best book setting. The earlier conclusion
+stands; only its explanation has improved. The gap was partly my
+threshold, and correcting that closes about two-thirds of it.
+
 ## Other thresholds, ranked by how much I trust them
 
 **ACTIONABLE_SCORE = 0.80** — most trustworthy of the set, because it
@@ -202,6 +284,29 @@ whether anything gets a verdict at all.
 
 **MAX_SENSIBLE_STOP_PCT = 15.0** — least trustworthy, per the decision
 above.
+
+## The thing all of this was calibrating doesn't beat the index (2026-07-28)
+
+Worth stating at the top level rather than leaving implicit in the
+per-parameter entries below. Measured over 100 mid-cap-or-larger names,
+taking every signal, the method returns +0.9% to +2.4% a year over
+2015-2026 and +1.2% to +3.3% over 2005-2026. Buying SPY and doing
+nothing returned +12.4% and +10.4% respectively.
+
+That reframes every threshold on this page. Tuning a parameter that
+moves per-trade return by a fraction of a point is rearranging
+something that is currently 8-10 points a year behind doing nothing at
+all. It doesn't make the calibration work wrong — a correctly measured
+parameter is still worth having — but it does mean no amount of it is
+the missing piece.
+
+The one component that clearly works is condition 6. See
+[known-gaps.md](known-gaps.md): one trade entered in the entire 2008
+decline, and a −9.7% worst drawdown against the index's −54.6%. The
+method does what it says on crash avoidance. The open question is no
+longer "does stage analysis work" but "is a mostly-cash portfolio with
+occasional equity exposure worth running", and that is a question about
+whether the low drawdown justifies a cash-like return.
 
 ## Standing caveats on any backtest number from this project
 
