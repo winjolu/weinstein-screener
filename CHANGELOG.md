@@ -16,6 +16,92 @@ whereas a list of intentions needs pruning to stay honest.
 ## [Unreleased]
 
 ### Added
+- `bar_cache.py`: the whole common-stock universe's weekly history, held
+  locally. 5,808 symbols, 3.8 million bars, back to August 2003, in 350
+  MB and about fifteen minutes.
+
+  Every conclusion this project has reached has been limited by sample
+  size rather than by method — the eleven-year study ran 100 names, and
+  three of its 273 trades carried the entire profit, which is why every
+  risk filter I tested destroyed the result by removing one of them. I
+  had assumed the data was expensive to get. It isn't: the batch endpoint
+  takes 20 symbols at 1200 bars, so the market is 291 calls away. The
+  bottleneck was never acquisition.
+- `run_backtest` reads from that cache and can skip the sector lookup.
+  A 40-name run over 2010-2020 went from network-bound minutes to six
+  seconds; 2,223 names projects to about six minutes against roughly
+  forty hours. Sector strength can't resolve before ~2021 anyway, since
+  daily bars cap at 4.8 years, so paying a call per ticker for it was
+  buying nothing.
+
+  A symbol missing from the cache now says so out loud. Silent exclusion
+  is the failure this project has hit three times already — pagination
+  truncating the universe at 40,000, one bad ticker killing nineteen good
+  ones in a batch, the sector fetch dying inside a bare except — and a
+  cache miss looks exactly like a stock that never qualified.
+- `MAX_EXTENSION_ABOVE_MA_PCT`, a gate on how far above the 30-week
+  average a stock may sit and still be buyable. Off by default. "Don't
+  buy too late in an advance" is on the book's never-violate list and had
+  no implementation; the only related check measured distance above the
+  *breakout level*, which is a different quantity. Written as a gate
+  rather than a tenth condition so it can't be outvoted by the other
+  nine, which is the failure it exists to close.
+
+  Measured at the bar a purchase fills on, not at the scan date. The
+  first version used the scan date and was wrong in a way that looked
+  plausible: scans see a breakout a median of four weeks late, so it
+  rejected trades over a run-up that happened after the price paid, and
+  it blocked re-entry after a stop-out, since a recovered stock is
+  extended when next scanned. Armed at 40% it removed 226 of 273 trades
+  and enabled no replacements at all.
+- `docs/preregistered-tests.md`, written and committed before running
+  any of it. I have now seen every result in this dataset, which makes me
+  unable to tell a principled hypothesis from one I noticed in the
+  output and am about to confirm on the same data. Each candidate rule is
+  marked with its provenance — from the book, structural, or noticed in
+  the data — since a rule taken from the source text cannot have been
+  fitted to results, and one I spotted in a chart very much can.
+
+### Changed
+- Rewrote `docs/methodology.md` against the source text rather than
+  against my own earlier summary of it, after a 62% loss in the
+  liquidity segmentation turned out to be a trade the book forbids
+  rather than a stop that failed.
+
+  The summary had recorded a nine-condition checklist where "at least 8
+  of 9 must be met". That rule isn't in the book. Its buying process is
+  an ordered funnel whose steps discard candidates, and its list of
+  conditions not to buy under is introduced as rules never to violate.
+  Where it describes a setup it likes, all the criteria are met — it
+  never counts them.
+
+  The book also addresses the 8-of-9 construction directly, asking
+  whether poor volume on a breakout can be overlooked when everything
+  else is positive, and answering that it can't, because the missing
+  confirmation is itself the danger signal. So the scoring model isn't
+  an approximation of the method; it's the reasoning the method warns
+  against.
+
+  Also corrected: `MAX_SENSIBLE_STOP_PCT = 15` was documented here as
+  arbitrary, a midpoint I'd split between two other figures. It is in
+  fact the book's own stated limit, and framed as a rule about which
+  stocks may be bought rather than a factor to weigh. It has been the
+  least-trusted threshold in the project on the strength of a note I
+  invented, while being the best-sourced one.
+
+  Nothing in the code changed. The divergences are written up in
+  known-gaps and methodology so the diagnosis is recorded before any of
+  it is acted on.
+- Confirmed the price bars are dividend-adjusted, by inspection: AGNC at
+  a ~13% yield reads $1.52 in 2008 against $10.59 now, and the scaling
+  factors for T and SPY each match their own yield compounded over their
+  own span. Dividends and reinvestment were therefore already in every
+  figure measured, on both the strategy and the buy-and-hold side, so
+  none of those comparisons need revisiting. It does mean stage analysis
+  is reading synthetic price levels, which matters most for high-yield
+  names and makes the book's round-number rule unimplementable.
+
+### Added
 - `portfolio_sim.py`, which turns a list of simulated trades into what an
   account would have done: a fixed stake into every signal, tracked over
   a calendar, reported as a yearly rate against simply buying the index.

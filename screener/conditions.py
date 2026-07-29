@@ -70,6 +70,23 @@ ACTIONABLE_SCORE = 0.80
 MIN_RESOLVED_CONDITIONS = 7
 NON_NEGOTIABLE_CONDITIONS = ("stage_setup", "price_above_ma", "market_stage")
 
+# How far above the 30-week average price may sit and still be buyable.
+# None disables the gate, which is the current behaviour and the default
+# until a value is chosen on evidence rather than by me picking one.
+#
+# This exists because "don't buy too late in an advance, far above the
+# ideal entry point" is on the book's never-violate list and had no
+# implementation. The only related check was an advisory flag measuring
+# distance above the *breakout level*, which is a different quantity: a
+# stock can break out of a tight base that is itself 174% above its own
+# 30-week average, read as barely extended, and take a stop two thirds of
+# the way down the chart. IMCC did exactly that and lost 63%.
+#
+# Gate rather than condition on purpose. Adding a tenth condition to a
+# ratio would let it be outvoted by the other nine, which is the failure
+# this is meant to close.
+MAX_EXTENSION_ABOVE_MA_PCT = None
+
 # Kept for reference: the legacy absolute threshold this replaced.
 ACTIONABLE_THRESHOLD = 8
 
@@ -610,6 +627,7 @@ def _empty_result():
         "breakout_confirmed": None, "swing_target": None, "swing_stop": None,
         "historical_levels": None, "new_52w_high": None, "breakout_idx": None,
         "breakout_age_weeks": None, "base_is_tight": None, "base_range_pct": None,
+        "extension_above_ma_pct": None,
     }
 
 
@@ -694,6 +712,27 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
 
     # Condition 2: price above its 30-week MA.
     price_above_ma = None if ma_now is None else closes[latest_idx] > ma_now
+    # How far above the average the stock sat *at the bar a purchase would
+    # actually fill on*, which is what decides how far below the entry the
+    # stop can possibly sit.
+    #
+    # Measured at the breakout bar, not at today's bar, and the difference
+    # is not cosmetic. A scan sees a breakout a median of four weeks after
+    # it happened, and both the entry plan and the backtest fill at the
+    # breakout level rather than at today's price. Measuring here would
+    # reject a trade on a run-up that occurred *after* the price paid — and
+    # worse, it would block re-entry after a stop-out, since a stock that
+    # has recovered is extended when next scanned. The first version did
+    # exactly that: armed at 40% it removed 226 of 273 trades and enabled
+    # no replacements at all.
+    #
+    # Falls back to the latest bar only when no breakout was detected,
+    # where there is no fill bar to speak of.
+    _entry_idx = breakout_idx if breakout_idx is not None else latest_idx
+    _ma_at_entry = ma_series[_entry_idx] if _entry_idx < len(ma_series) else None
+    extension_above_ma_pct = (
+        None if not _ma_at_entry else (closes[_entry_idx] / _ma_at_entry - 1) * 100
+    )
 
     # MA trend, stored alongside condition 2 but not itself one of the 9.
     ma_rising = None if ma_now is None or ma_prior is None else ma_now > ma_prior
@@ -794,7 +833,7 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         "risk_reward": risk_reward,
     }
     conditions_met = sum(1 for v in conditions.values() if v is True)
-    scoring = score_conditions(conditions)
+    scoring = score_conditions(conditions, extension_above_ma_pct)
 
     conditions_detail = {}
     for name, value in conditions.items():
@@ -872,10 +911,11 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         "breakout_age_weeks": base["breakout_age_weeks"],
         "base_is_tight": base["base_is_tight"],
         "base_range_pct": base["base_range_pct"],
+        "extension_above_ma_pct": extension_above_ma_pct,
     }
 
 
-def score_conditions(conditions):
+def score_conditions(conditions, extension_above_ma_pct=None):
     """Turns the 9 raw True/False/None results into a verdict that keeps
     "failed" and "unknown" distinct. See the scoring constants above for
     why. Returns the full picture rather than one number, so output can
@@ -889,7 +929,20 @@ def score_conditions(conditions):
     blocking = [name for name in NON_NEGOTIABLE_CONDITIONS if conditions.get(name) is False]
     required = math.ceil(ACTIONABLE_SCORE * resolved) if resolved else None
 
-    if blocking:
+    too_extended = (
+        MAX_EXTENSION_ABOVE_MA_PCT is not None
+        and extension_above_ma_pct is not None
+        and extension_above_ma_pct > MAX_EXTENSION_ABOVE_MA_PCT
+    )
+
+    if too_extended:
+        actionable = False
+        reason = (
+            f"price is {extension_above_ma_pct:.0f}% above its 30-week average, "
+            f"past the {MAX_EXTENSION_ABOVE_MA_PCT:.0f}% limit — buying here is "
+            f"chasing, and puts the stop far below the entry"
+        )
+    elif blocking:
         actionable = False
         reason = "blocked by non-negotiable condition(s): " + ", ".join(blocking)
     elif resolved < MIN_RESOLVED_CONDITIONS:
@@ -914,6 +967,8 @@ def score_conditions(conditions):
         "resolved": resolved,
         "required": required,
         "score": (met / resolved) if resolved else None,
+        "extension_above_ma_pct": extension_above_ma_pct,
+        "too_extended": too_extended,
         "blocking": blocking,
     }
 

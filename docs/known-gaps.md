@@ -9,6 +9,81 @@ Numeric thresholds have their own file —
 [parameter-calibration.md](parameter-calibration.md) — since the question
 there isn't "is this missing" but "how much evidence does this rest on".
 
+## The checklist doesn't match the book (found 2026-07-28)
+
+These came out of reading the source directly rather than my own summary
+of it. They sit above everything else in this file: the items below are
+bugs in an implementation, these are the implementation being of the
+wrong thing. Full detail in [methodology.md](methodology.md).
+
+**The scoring model contradicts the book explicitly.** Scoring nine
+conditions as a ratio and admitting anything at or above 0.80 means any
+single condition may fail. The book poses that exact case — every factor
+positive except volume confirmation — and answers that it must not be
+overlooked, because the missing confirmation is itself the warning. Its
+own checklist is a sequence of steps that discard candidates, and its
+"don't buy" list is introduced as rules never to violate. Nowhere does
+it count conditions or tolerate a shortfall.
+
+Consequence: `ACTIONABLE_SCORE`, `MIN_RESOLVED_CONDITIONS` and
+`NON_NEGOTIABLE_CONDITIONS` are all scaffolding around a model that
+shouldn't exist. The last one is the tell — it was added because scoring
+alone admitted setups that were obviously wrong, which is the design
+failing and being patched instead of replaced.
+
+**The 15% stop limit is a purchase rule, implemented as a scoring
+factor.** The book says to work out the stop before placing the buy
+order and to restrict purchases to those risking no more than 15%. Here
+it fails condition 9 and nothing more, so a setup whose stop sits 60%
+below entry still qualifies on 7 of the remaining 8. This is the direct
+cause of the −62% and −63% trades in the liquidity segmentation: not a
+stop that failed, but a purchase the method forbids.
+
+**"Don't buy too late in an advance" isn't implemented.** It's on the
+book's never-violate list. Here the only related check is an advisory
+`extended` flag on the entry plan, and it measures distance above the
+*breakout level* rather than above the moving average — two different
+things. A stock can break out of a tight base that is itself 174% above
+its 30-week average, read as barely extended, and carry a stop two
+thirds of the way down the chart. `IMCC` did exactly that and lost 63%.
+
+**Overhead resistance isn't checked.** The book says to discard
+candidates with heavy resistance nearby — resistance *above* the entry,
+capping the move. `resistance_breakout` checks that a level was cleared,
+which is a different question. Nothing looks up.
+
+**The round-number refinement is absent**, and can't be implemented on
+the current data — see the dividend-adjustment item below.
+
+## Price data is dividend-adjusted, which is right for returns and wrong for charts
+
+Confirmed 2026-07-28 by inspection: historical bars are scaled down to
+bake in reinvested dividends. `AGNC`, yielding around 13%, reads $1.52
+in 2008 against $10.59 now; `T` is scaled by about 4.7x over 23 years
+and `SPY` by about 1.55x, each matching its own yield compounded over
+its own span. There is no unadjusted option on the bars endpoint,
+though `get_corp_action` exposes dividend events, so an unadjusted
+series could be reconstructed.
+
+**Good news first: this means dividends are already accounted for on
+both sides**, and DRIP is effectively modelled, so the backtest returns
+and the buy-and-hold comparison are both total-return figures and remain
+comparable. Nothing in the measured results needs revisiting.
+
+The problem is the chart, not the arithmetic. Stage analysis reads crowd
+behaviour at price levels people actually paid, and those levels have
+been scaled away. Support, resistance and the 30-week average all sit on
+a synthetic series, and the book's round-number rule — put the stop just
+under $20 because orders pile up there — is not implementable, since
+adjusted $20 was never a real price.
+
+**Sized honestly, it's a smaller problem than that sounds.** The
+screener looks back 104 weeks, so the distortion is bounded by roughly
+two years of dividends: about 4% for a typical 2% yielder, 8% for a
+utility, 28% for a mortgage REIT. Meaningful for high-yield names,
+marginal for most. Ranked below the checklist items above, which are
+costing 60% on individual trades today.
+
 ## Correctness risks still open
 
 **The universe prefilter is untested.** `_could_still_qualify` decides
