@@ -16,6 +16,11 @@ from screener import backtest, stop_loss
 from tests.synthetic import bar, daily_dates, trending_bars, weekly_dates
 
 
+def _flat_bars(n, price=100.0):
+    """A quiet series — enough bars to warm the indicators, no setup."""
+    return [bar(d, price * 1.01, price * 0.99, price) for d in weekly_dates(n, "2019-01-04")]
+
+
 def _sector(daily_bars_a, daily_bars_b):
     return {"sector": "Oil & Gas", "sector_etf_bars": daily_bars_a, "spy_bars": daily_bars_b}
 
@@ -233,3 +238,79 @@ class TrailingStopTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CacheBackedRunTest(unittest.TestCase):
+    """Reading bars from a local cache instead of the API.
+
+    Network was the dominant cost of a wide run and it was spent
+    re-fetching history already on disk. The risks introduced are both
+    silent ones: a symbol missing from the cache looking like a symbol
+    that never qualified, and a partial cache quietly falling back to
+    the network and costing hours.
+    """
+
+    def setUp(self):
+        self._real_weekly = backtest.data_fetch.get_weekly_bars
+        self._real_index = backtest.data_fetch.get_index_bars
+        self._real_sector = backtest.data_fetch.get_sector_data_for_backtest
+        self.weekly_calls = []
+        self.sector_calls = []
+
+        def no_weekly(ticker, **kw):
+            self.weekly_calls.append(ticker)
+            raise AssertionError(f"went to the network for {ticker} despite a cache")
+
+        def no_sector(ticker, *a, **kw):
+            self.sector_calls.append(ticker)
+            return {"sector": None, "sector_etf_bars": [], "spy_bars": []}
+
+        backtest.data_fetch.get_weekly_bars = no_weekly
+        backtest.data_fetch.get_index_bars = lambda *a, **kw: _flat_bars(300)
+        backtest.data_fetch.get_sector_data_for_backtest = no_sector
+
+    def tearDown(self):
+        backtest.data_fetch.get_weekly_bars = self._real_weekly
+        backtest.data_fetch.get_index_bars = self._real_index
+        backtest.data_fetch.get_sector_data_for_backtest = self._real_sector
+
+    def test_cached_symbols_never_touch_the_network(self):
+        cache = {"AAA": _flat_bars(300), "SPY": _flat_bars(300)}
+        backtest.run_backtest(["AAA"], "2024-01-05", "2024-06-07",
+                              bars_by_symbol=cache, fetch_sector=False,
+                              parameter_set="test_cache")
+        self.assertEqual(self.weekly_calls, [])
+
+    def test_a_symbol_absent_from_the_cache_is_skipped_not_fetched(self):
+        cache = {"AAA": _flat_bars(300), "SPY": _flat_bars(300)}
+        backtest.run_backtest(["AAA", "MISSING"], "2024-01-05", "2024-06-07",
+                              bars_by_symbol=cache, fetch_sector=False,
+                              parameter_set="test_cache")
+        self.assertEqual(self.weekly_calls, [],
+                         "a cache miss must not silently go to the network")
+
+    def test_fetch_sector_false_skips_the_sector_lookup(self):
+        """Condition 5 cannot resolve before ~2021 anyway, so paying one
+        call per ticker for it is spending money to learn nothing."""
+        cache = {"AAA": _flat_bars(300), "SPY": _flat_bars(300)}
+        backtest.run_backtest(["AAA"], "2024-01-05", "2024-06-07",
+                              bars_by_symbol=cache, fetch_sector=False,
+                              parameter_set="test_cache")
+        self.assertEqual(self.sector_calls, [])
+
+    def test_fetch_sector_true_still_looks_it_up(self):
+        cache = {"AAA": _flat_bars(300), "SPY": _flat_bars(300)}
+        backtest.run_backtest(["AAA"], "2024-01-05", "2024-06-07",
+                              bars_by_symbol=cache, fetch_sector=True,
+                              parameter_set="test_cache")
+        self.assertEqual(self.sector_calls, ["AAA"])
+
+    def test_skipped_symbols_are_reported_out_loud(self):
+        import contextlib, io
+        cache = {"SPY": _flat_bars(300)}
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            backtest.run_backtest(["GONE"], "2024-01-05", "2024-06-07",
+                                  bars_by_symbol=cache, fetch_sector=False,
+                                  parameter_set="test_cache")
+        self.assertIn("skipped", buf.getvalue())

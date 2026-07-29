@@ -39,12 +39,30 @@ since admitting a trade earlier suppresses later ones through the
 in-trade window.
 
 **What this decision does not do is validate 15% as the right number.**
-It remains arbitrary — I picked it as a midpoint between the roughly
+~~It remains arbitrary — I picked it as a midpoint between the roughly
 5-6% risk in the book's worked examples and the roughly 20% my own stop
-placement produces on real tickers, two figures I never reconciled. It
-is currently the binding constraint on condition 9, rejecting 13 of 15
-tickers on a recent scan, so it is doing a great deal of work for a
-number chosen that way.
+placement produces on real tickers, two figures I never reconciled.~~
+
+**Correction, 2026-07-28: that was wrong, and it inverted the confidence
+I should have had in this number.** Reading the source directly, the
+book states the limit outright — restrict purchases to cases where the
+initial stop sits no more than 15% below the purchase price, allowing
+occasional exceptions for an outstanding pattern. I had not read that
+passage when I wrote the note above; I reconstructed the figure by
+splitting the difference between two other numbers and then recorded my
+own reconstruction as arbitrary.
+
+So 15.0 is the best-sourced threshold in this project rather than the
+worst, and it has been treated as the least trustworthy one on the
+strength of a note I made up. See [methodology.md](methodology.md).
+
+The more important half of the correction is what kind of rule it is.
+The book frames it as a constraint on **which stocks may be bought** —
+calculate the stop before placing the buy order, and let the resulting
+risk filter the candidate list. It is implemented here as one condition
+of nine, so a setup whose stop sits 60% below entry fails condition 9,
+scores 7 of the remaining 8, and is bought anyway. That is not a
+calibration problem and no value of this constant fixes it.
 
 **Re-open when:** the full-universe scan is verified and has produced a
 dataset in the hundreds of trades rather than tens, which is the point
@@ -267,10 +285,31 @@ threshold, and correcting that closes about two-thirds of it.
 
 ## Other thresholds, ranked by how much I trust them
 
-**ACTIONABLE_SCORE = 0.80** — most trustworthy of the set, because it
+**ACTIONABLE_SCORE = 0.80** — ~~most trustworthy of the set, because it
 is anchored rather than invented: ceil(0.8 × 9) = 8 reproduces the
-previous "8 of 9" rule exactly when every condition resolves, and it
-degrades sensibly as conditions come back unknown. Scale-free.
+previous "8 of 9" rule exactly when every condition resolves.~~
+
+**Struck 2026-07-28.** This was anchored to the "8 of 9" rule, and that
+rule is not in the book — I had it from my own summary, which invented
+it. So the reasoning was that 0.80 faithfully reproduces a threshold
+that never existed. Faithfully reproducing something made up is not
+anchoring.
+
+Worse, the book addresses this exact construction and rejects it. It
+asks whether poor volume on a breakout can be overlooked when every
+other factor is positive, and answers that it cannot — the missing
+confirmation is itself the danger signal. A score that admits a setup at
+8 of 9 is that reasoning in code, and which condition failed is the part
+it discards. The right shape is gates, not a ratio. Recorded in
+[known-gaps.md](known-gaps.md); not changed yet, because switching the
+whole checklist to hard gates is a methodology decision rather than a
+retune, and it would reject most of what currently qualifies.
+
+**MIN_RESOLVED_CONDITIONS = 7 and NON_NEGOTIABLE_CONDITIONS** — both are
+patches over the same missing structure. The non-negotiable list exists
+because scoring alone let obviously-wrong setups through, which is the
+scoring model failing and being propped up rather than replaced. If the
+checklist becomes gates, both constants disappear.
 
 **MIN_IMPORTANT_DECLINE_PCT = 10.0** — 10% is the conventional
 correction threshold, so not arbitrary, and its blast radius is small:

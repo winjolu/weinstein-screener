@@ -339,3 +339,130 @@ class InsufficientHistoryTest(unittest.TestCase):
     def test_a_very_short_history_still_evaluates_without_qualifying(self):
         result = C.evaluate_conditions("T", trending_bars(104)[-8:], self._index(), None)
         self.assertFalse(result["actionable"])
+
+
+class ExtensionGateTest(unittest.TestCase):
+    """"Don't buy too late in an advance" is on the book's never-violate
+    list and had no implementation. It's a gate rather than a tenth
+    condition on purpose: in a ratio it could be outvoted by the other
+    nine, which is the exact failure it exists to close.
+    """
+
+    def _conditions(self, **over):
+        base = {name: True for name in C.CONDITION_NAMES}
+        base.update(over)
+        return base
+
+    def setUp(self):
+        self._prev = C.MAX_EXTENSION_ABOVE_MA_PCT
+
+    def tearDown(self):
+        C.MAX_EXTENSION_ABOVE_MA_PCT = self._prev
+
+    def test_disabled_by_default_so_behaviour_is_unchanged(self):
+        C.MAX_EXTENSION_ABOVE_MA_PCT = None
+        s = C.score_conditions(self._conditions(), extension_above_ma_pct=500.0)
+        self.assertTrue(s["actionable"])
+        self.assertFalse(s["too_extended"])
+
+    def test_a_wildly_extended_stock_is_blocked_even_with_every_condition_met(self):
+        """IMCC passed 7 of 8 while sitting 174% above its average, and
+        lost 63%. A perfect scorecard must not override this."""
+        C.MAX_EXTENSION_ABOVE_MA_PCT = 30.0
+        s = C.score_conditions(self._conditions(), extension_above_ma_pct=174.0)
+        self.assertFalse(s["actionable"])
+        self.assertTrue(s["too_extended"])
+        self.assertIn("30-week average", s["reason"])
+
+    def test_a_stock_inside_the_limit_is_unaffected(self):
+        C.MAX_EXTENSION_ABOVE_MA_PCT = 30.0
+        s = C.score_conditions(self._conditions(), extension_above_ma_pct=12.0)
+        self.assertTrue(s["actionable"])
+        self.assertFalse(s["too_extended"])
+
+    def test_the_boundary_is_inclusive(self):
+        C.MAX_EXTENSION_ABOVE_MA_PCT = 30.0
+        self.assertTrue(C.score_conditions(self._conditions(), 30.0)["actionable"])
+        self.assertFalse(C.score_conditions(self._conditions(), 30.01)["actionable"])
+
+    def test_an_unmeasurable_extension_does_not_block(self):
+        """No moving average yet is a different thing from being extended;
+        blocking on it would silently discard young listings."""
+        C.MAX_EXTENSION_ABOVE_MA_PCT = 30.0
+        s = C.score_conditions(self._conditions(), extension_above_ma_pct=None)
+        self.assertTrue(s["actionable"])
+
+    def test_the_gate_outranks_the_scoring_ratio(self):
+        """Blocked means blocked — not 'docked a point'."""
+        C.MAX_EXTENSION_ABOVE_MA_PCT = 30.0
+        s = C.score_conditions(self._conditions(), extension_above_ma_pct=200.0)
+        self.assertFalse(s["actionable"])
+        self.assertEqual(s["met"], len(C.CONDITION_NAMES))
+
+
+class ExtensionIsActuallyMeasuredTest(unittest.TestCase):
+    """The gate above tests score_conditions with a value handed to it,
+    which passes even if evaluate_conditions never computes one. This
+    checks the number is derived from the bars — a mutation replacing the
+    calculation with None survived until this existed.
+    """
+
+    def _bars(self, closes):
+        dates = weekly_dates(len(closes))
+        return [bar(d, c * 1.01, c * 0.99, c) for d, c in zip(dates, closes)]
+
+    def test_extension_is_computed_from_price_against_its_own_average(self):
+        # Flat for long enough to establish a 30-week average near 100,
+        # then a single bar far above it.
+        closes = [100.0] * 120 + [200.0]
+        result = C.evaluate_conditions("TEST", self._bars(closes), self._bars(closes), None)
+        ext = result["extension_above_ma_pct"]
+        self.assertIsNotNone(ext, "extension must be measured, not left None")
+        # The average is dragged slightly above 100 by the final bar, so
+        # the extension lands just under a literal doubling.
+        self.assertGreater(ext, 80.0)
+        self.assertLess(ext, 100.0)
+
+    def test_a_stock_sitting_on_its_average_reads_near_zero(self):
+        closes = [100.0] * 120
+        result = C.evaluate_conditions("TEST", self._bars(closes), self._bars(closes), None)
+        self.assertAlmostEqual(result["extension_above_ma_pct"], 0.0, places=6)
+
+    def test_too_short_a_history_reports_none_rather_than_guessing(self):
+        result = C.evaluate_conditions("TEST", [], [], None)
+        self.assertIsNone(result["extension_above_ma_pct"])
+
+
+class ExtensionMeasuredAtTheFillBarTest(unittest.TestCase):
+    """The gate must read the bar a purchase fills on, not the bar the
+    scan happens on.
+
+    A scan sees a breakout a median of four weeks late, and both the entry
+    plan and the backtest fill at the breakout level. Measuring at the scan
+    rejects trades over a run-up that happened after the price paid, and
+    blocks re-entry after a stop-out — a recovered stock is extended when
+    next scanned. Armed at 40%, the scan-date version removed 226 of 273
+    trades and produced no replacements.
+    """
+
+    def _bars(self, closes):
+        dates = weekly_dates(len(closes))
+        return [bar(d, c * 1.01, c * 0.99, c) for d, c in zip(dates, closes)]
+
+    def test_a_run_up_after_the_breakout_does_not_inflate_the_reading(self):
+        """Same breakout, then a large advance. The extension attributed
+        to the entry must not grow just because price kept going."""
+        base = [100.0] * 100 + [104.0] * 20        # base, then a breakout
+        calm = self._bars(base + [106.0] * 3)
+        ranaway = self._bars(base + [106.0, 180.0, 260.0])
+        a = C.evaluate_conditions("T", calm, calm, None)["extension_above_ma_pct"]
+        b = C.evaluate_conditions("T", ranaway, ranaway, None)["extension_above_ma_pct"]
+        if a is None or b is None:
+            self.skipTest("no breakout detected in this synthetic series")
+        self.assertAlmostEqual(a, b, delta=1.0,
+                               msg="extension moved with post-entry price action")
+
+    def test_it_still_reports_a_number_when_no_breakout_was_found(self):
+        closes = [100.0] * 120
+        result = C.evaluate_conditions("T", self._bars(closes), self._bars(closes), None)
+        self.assertIsNotNone(result["extension_above_ma_pct"])

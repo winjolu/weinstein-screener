@@ -265,7 +265,8 @@ def _lookback_weeks_needed(start_date):
 
 
 def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, parameter_set="baseline",
-                  trailing_method='ma', max_hold_weeks=52, **condition_overrides):
+                  trailing_method='ma', max_hold_weeks=52, bars_by_symbol=None,
+                  fetch_sector=True, **condition_overrides):
     """Steps through start_date to end_date at check_interval_weeks
     intervals. At each checkpoint, evaluates each ticker as of that date
     and, if it comes back actionable with a real breakout bar to size
@@ -282,6 +283,19 @@ def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, paramete
     are skipped until that trade resolves, so one real breakout doesn't
     get re-detected and re-recorded as several overlapping trades.
 
+    :param bars_by_symbol: optional {symbol: bars} read instead of the
+        API — normally bar_cache.load(). Network was the dominant cost of
+        a wide run, and it was spent re-fetching history already on disk;
+        a few thousand names is hours of transfer for nothing. Symbols
+        absent from the mapping are skipped rather than fetched, so a
+        partial cache silently shrinks the universe instead of quietly
+        going back to the network.
+    :param fetch_sector: set False to skip the per-ticker sector lookup
+        and run an eight-condition checklist. Sector strength needs daily
+        bars, which the server caps at ~4.8 years, so for any window
+        starting before roughly 2021 condition 5 cannot resolve anyway —
+        fetching it spends one call per ticker to learn nothing. Turning
+        it off is honest about that rather than paying for it.
     :param condition_overrides: passed to conditions.py's module-level
         constants for the duration of this run only — see
         _condition_overrides(). Example: TSR_PIVOT_LENGTH=10.
@@ -293,16 +307,35 @@ def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, paramete
 
     checkpoints = _checkpoint_dates(start_date, end_date, check_interval_weeks)
 
-    index_bars_full = data_fetch.get_index_bars("SPY", lookback_weeks=lookback_weeks)
+    if bars_by_symbol is not None and "SPY" in bars_by_symbol:
+        index_bars_full = bars_by_symbol["SPY"]
+    else:
+        index_bars_full = data_fetch.get_index_bars("SPY", lookback_weeks=lookback_weeks)
+
+    empty_sector = {"sector": None, "sector_etf_bars": [], "spy_bars": []}
+    skipped = 0
 
     trades = []
     for ticker in tickers:
-        try:
-            bars_full = data_fetch.get_weekly_bars(ticker, lookback_weeks=lookback_weeks)
-            sector_data_full = data_fetch.get_sector_data_for_backtest(ticker, lookback_days)
-        except Exception as exc:
-            print(f"[{ticker}] backtest skipped — fetch failed: {exc}")
-            continue
+        if bars_by_symbol is not None:
+            bars_full = bars_by_symbol.get(ticker)
+            if not bars_full:
+                skipped += 1
+                continue
+            sector_data_full = (
+                data_fetch.get_sector_data_for_backtest(ticker, lookback_days)
+                if fetch_sector else empty_sector
+            )
+        else:
+            try:
+                bars_full = data_fetch.get_weekly_bars(ticker, lookback_weeks=lookback_weeks)
+                sector_data_full = (
+                    data_fetch.get_sector_data_for_backtest(ticker, lookback_days)
+                    if fetch_sector else empty_sector
+                )
+            except Exception as exc:
+                print(f"[{ticker}] backtest skipped — fetch failed: {exc}")
+                continue
 
         in_trade_until = None
         for as_of_date in checkpoints:
@@ -343,5 +376,13 @@ def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, paramete
             db.insert_backtest_trade(trade)
 
             in_trade_until = trade["exit_date"] or end_date
+
+    if skipped:
+        # Said out loud on purpose. A name missing from the cache
+        # contributes no trades and looks identical to one that simply
+        # never qualified, which is the silent-exclusion failure this
+        # project has now hit in the universe pagination, the batch
+        # fetcher and the sector lookup.
+        print(f"{skipped} of {len(tickers)} tickers had no cached bars and were skipped")
 
     return trades
