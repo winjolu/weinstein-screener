@@ -314,3 +314,188 @@ class CacheBackedRunTest(unittest.TestCase):
                                   bars_by_symbol=cache, fetch_sector=False,
                                   parameter_set="test_cache")
         self.assertIn("skipped", buf.getvalue())
+
+
+class EntryPriceTest(unittest.TestCase):
+    """Where a simulated fill happens.
+
+    The engine used to fill at the breakout bar regardless of when the
+    signal fired. Scans find a breakout a median of four weeks after it
+    happened, so that books a rise which had already occurred — measured
+    at +1.11 points a trade across the 273-trade study, which was the
+    entire measured edge. The decision was always point-in-time clean;
+    the fill price was not.
+    """
+
+    def test_signal_fills_are_never_earlier_than_the_signal(self):
+        idx = backtest._bar_index_on_or_before(_flat_bars(50), "2019-06-07")
+        bars = _flat_bars(50)
+        self.assertLessEqual(bars[idx]["time"][:10], "2019-06-07")
+        self.assertGreater(bars[idx + 1]["time"][:10], "2019-06-07")
+
+    def test_a_date_before_every_bar_has_no_index(self):
+        self.assertIsNone(backtest._bar_index_on_or_before(_flat_bars(50), "1990-01-01"))
+
+    def test_a_date_after_every_bar_returns_the_last(self):
+        bars = _flat_bars(50)
+        self.assertEqual(backtest._bar_index_on_or_before(bars, "2099-01-01"), len(bars) - 1)
+
+    def test_the_two_entry_modes_price_differently_on_a_risen_stock(self):
+        """The whole point: if price rose between breakout and signal,
+        filling at the breakout is a price no longer available."""
+        dates = weekly_dates(60, "2019-01-04")
+        rising = [bar(d, 100 + i * 2, 98 + i * 2, 99 + i * 2) for i, d in enumerate(dates)]
+        early = backtest._bar_index_on_or_before(rising, dates[20])
+        late = backtest._bar_index_on_or_before(rising, dates[40])
+        self.assertLess(rising[early]["close"], rising[late]["close"],
+                        "a rising series must price later fills higher")
+
+    def test_default_is_the_conservative_mode(self):
+        import inspect
+        sig = inspect.signature(backtest.run_backtest)
+        self.assertEqual(sig.parameters["entry_at"].default, "signal")
+
+
+class EntryModeIntegrationTest(unittest.TestCase):
+    """End-to-end: which bar run_backtest actually fills on.
+
+    Testing the helper alone was not enough — a mutation swapping the
+    call for `entry_idx = breakout_idx` passed the whole suite, because
+    nothing checked what the engine did with it.
+    """
+
+    def setUp(self):
+        self._real_eval = backtest.evaluate_as_of
+        self._real_index = backtest.data_fetch.get_index_bars
+        backtest.data_fetch.get_index_bars = lambda *a, **kw: _flat_bars(200)
+        self.bars = [bar(d, 100 + i, 98 + i, 99 + i)
+                     for i, d in enumerate(weekly_dates(200, "2019-01-04"))]
+        # A breakout long before any checkpoint, so the two modes must
+        # disagree if the engine honours entry_at at all.
+        self.breakout_idx = 100
+
+        def fake_eval(ticker, as_of_date, bars_full, index_bars, sector):
+            return {"actionable": True, "breakout_idx": self.breakout_idx,
+                    "swing_stop": 50.0, "swing_target": 400.0,
+                    "conditions_met": 9, "as_of_date": as_of_date}
+
+        backtest.evaluate_as_of = fake_eval
+
+    def tearDown(self):
+        backtest.evaluate_as_of = self._real_eval
+        backtest.data_fetch.get_index_bars = self._real_index
+
+    def _run(self, mode):
+        cache = {"AAA": self.bars}
+        return backtest.run_backtest(
+            ["AAA"], self.bars[150]["time"][:10], self.bars[190]["time"][:10],
+            check_interval_weeks=4, parameter_set=f"entrymode_{mode}",
+            bars_by_symbol=cache, fetch_sector=False, entry_at=mode)
+
+    def test_signal_mode_fills_at_the_checkpoint_not_the_breakout(self):
+        trades = self._run("signal")
+        self.assertTrue(trades, "expected a trade")
+        t = trades[0]
+        self.assertEqual(t["entry_date"], t["as_of_date"],
+                         "signal mode must fill on the signal bar")
+        self.assertGreater(t["entry_price"], self.bars[self.breakout_idx]["close"],
+                           "a risen series must fill higher than the old breakout")
+
+    def test_breakout_mode_reproduces_the_old_behaviour(self):
+        trades = self._run("breakout")
+        self.assertTrue(trades)
+        t = trades[0]
+        self.assertEqual(t["entry_date"], self.bars[self.breakout_idx]["time"][:10])
+        self.assertLess(t["entry_date"], t["as_of_date"])
+
+    def test_the_two_modes_disagree_on_price(self):
+        a = self._run("signal")[0]["entry_price"]
+        b = self._run("breakout")[0]["entry_price"]
+        self.assertNotEqual(a, b, "if these match the parameter does nothing")
+
+
+class ExtensionProfitTakingTest(unittest.TestCase):
+    """R5: the book's second rule about stocks far above their average.
+
+    Its answer to a position that has skyrocketed is not "don't buy" —
+    that's the entry rule — but "take part of it off and trail the rest".
+    Distinct from every other candidate tested because it removes no
+    trades, so it cannot destroy the winners by excluding them.
+    """
+
+    def _runaway(self, n=80):
+        """Flat, then a violent advance far above the average."""
+        dates = weekly_dates(n, "2019-01-04")
+        out = []
+        for i, d in enumerate(dates):
+            price = 100.0 if i < 50 else 100.0 * (1 + 0.10 * (i - 49))
+            out.append(bar(d, price * 1.02, price * 0.98, price))
+        return out
+
+    def test_disabled_by_default(self):
+        bars = self._runaway()
+        t = backtest.simulate_trade("AAA", bars[50]["time"][:10], bars[50]["close"],
+                                    50.0, None, bars, max_hold_weeks=30)
+        self.assertIsNotNone(t)
+        self.assertNotEqual(t["exit_reason"], "target_then_stop",
+                            "no target and no rule armed: nothing should bank early")
+
+    def test_it_banks_part_of_the_position_when_price_runs_far_above_the_average(self):
+        bars = self._runaway()
+        t = backtest.simulate_trade("AAA", bars[50]["time"][:10], bars[50]["close"],
+                                    50.0, None, bars, max_hold_weeks=30,
+                                    take_profit_above_ma_pct=40.0)
+        self.assertIsNotNone(t)
+        self.assertIn(t["exit_reason"], ("target_then_stop", "target_then_open"),
+                      "a runaway advance should have triggered a partial exit")
+
+    def test_a_stock_that_never_extends_is_untouched(self):
+        dates = weekly_dates(80, "2019-01-04")
+        flat = [bar(d, 101.0, 99.0, 100.0) for d in dates]
+        a = backtest.simulate_trade("AAA", flat[50]["time"][:10], 100.0, 50.0, None,
+                                    flat, max_hold_weeks=25)
+        b = backtest.simulate_trade("AAA", flat[50]["time"][:10], 100.0, 50.0, None,
+                                    flat, max_hold_weeks=25, take_profit_above_ma_pct=40.0)
+        self.assertEqual(a["exit_reason"], b["exit_reason"])
+        self.assertAlmostEqual(a["return_pct"], b["return_pct"], places=6)
+
+    def _spike_then_collapse(self, n=90):
+        """Rises hard, then gives it all back — so the stop actually
+        fires and the trade resolves. A series that only ever rises
+        leaves both arms open with a null return, which compares equal
+        and looks like the rule doing nothing."""
+        dates = weekly_dates(n, "2019-01-04")
+        out = []
+        for i, d in enumerate(dates):
+            if i < 50:
+                price = 100.0
+            elif i < 70:
+                price = 100.0 * (1 + 0.10 * (i - 49))
+            else:
+                price = 300.0 * (1 - 0.08 * (i - 69))
+            out.append(bar(d, price * 1.02, price * 0.98, price))
+        return out
+
+    def test_a_lower_threshold_banks_earlier(self):
+        bars = self._spike_then_collapse()
+        early = backtest.simulate_trade("AAA", bars[50]["time"][:10], bars[50]["close"],
+                                        50.0, None, bars, max_hold_weeks=40,
+                                        take_profit_above_ma_pct=20.0)
+        late = backtest.simulate_trade("AAA", bars[50]["time"][:10], bars[50]["close"],
+                                       50.0, None, bars, max_hold_weeks=40,
+                                       take_profit_above_ma_pct=200.0)
+        self.assertIsNotNone(early["return_pct"], "trade must resolve to be comparable")
+        self.assertIsNotNone(late["return_pct"])
+        self.assertNotEqual(early["return_pct"], late["return_pct"],
+                            "if thresholds give identical results the rule is inert")
+
+    # Deliberately not tested: whether banking early beats riding the
+    # position. I wrote that assertion and it failed — on this fixture
+    # riding returned +71.5% against +46.0%, because a 30% threshold
+    # banks half the position while the average is still low and the
+    # trailing stop then carries the rest much higher. That is a claim
+    # about markets, not about code, and baking an answer to it into a
+    # test would prejudge the very thing R5 exists to measure. The
+    # changelog already records making this mistake once with the
+    # partial-exit tests; the rule here is that tests assert mechanics
+    # and the backtest answers the market question.

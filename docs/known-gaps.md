@@ -9,6 +9,36 @@ Numeric thresholds have their own file —
 [parameter-calibration.md](parameter-calibration.md) — since the question
 there isn't "is this missing" but "how much evidence does this rest on".
 
+## Two arms of the pre-registered batch never ran
+
+R6 (trader's-way exits) and R7 (moving-average variants) need code that
+doesn't exist. Six of eight were tested; these are recorded rather than
+dropped so the denominator stays honest.
+
+R6 is the more interesting of the two, and the case for it survives the
+failed batch: it's the only registered rule that would sell on *time*
+rather than on price — exiting a position that has gone sideways for
+months. Everything tested so far only ever exits on a stop, so a trade
+that stalls ties up capital indefinitely. R7 is cheap to build now that
+`moving_averages` already has a weighted average.
+
+**Read them against the run, though.** Six arms varied entries, exits,
+gating and stage detection, and the spread between best and worst was
+about four points a year against a deficit of eight. Nothing suggests a
+seventh variation closes it.
+
+## The checklist rewrite is no longer the priority (2026-07-29)
+
+The section below records that the scoring model contradicts the book,
+which is still true and still worth knowing. What changed is its
+standing as a *fix*: R2 tested exactly that correction — hard gates
+instead of the 8-of-9 ratio — and it made results worse, cutting trades
+by 91% and returning +0.44% a year against the baseline's +3.47%.
+
+So the divergence from the source is real, and closing it is not the
+route to a working system. Keep the section for accuracy; don't read it
+as a roadmap.
+
 ## The checklist doesn't match the book (found 2026-07-28)
 
 These came out of reading the source directly rather than my own summary
