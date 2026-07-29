@@ -466,3 +466,82 @@ class ExtensionMeasuredAtTheFillBarTest(unittest.TestCase):
         closes = [100.0] * 120
         result = C.evaluate_conditions("T", self._bars(closes), self._bars(closes), None)
         self.assertIsNotNone(result["extension_above_ma_pct"])
+
+
+class CurvatureStageTest(unittest.TestCase):
+    """R8: the shape of the average, not just its direction.
+
+    The book describes a Stage 1-to-2 transition as the average falling,
+    flattening, then curving up. A single slope reading answers "is it
+    rising" — the first derivative — where the shape is the second. A
+    flat average reached by easing off a steep decline is the setup; a
+    flat average rolling over from an advance is its opposite, and one
+    slope measurement cannot tell them apart.
+    """
+
+    def setUp(self):
+        self._prev = C.MA_CURVATURE_LOOKBACK
+
+    def tearDown(self):
+        C.MA_CURVATURE_LOOKBACK = self._prev
+
+    def _bars(self, closes):
+        return [bar(d, c * 1.01, c * 0.99, c)
+                for d, c in zip(weekly_dates(len(closes)), closes)]
+
+    def _decelerating_decline_then_recovery(self):
+        """Falls hard, decelerates, flattens, price crosses above."""
+        closes = []
+        price = 200.0
+        for step in range(60):
+            price *= (1 - 0.03 + step * 0.0005)   # decline easing off
+            closes.append(price)
+        for _ in range(50):
+            price *= 1.012                        # gentle recovery
+            closes.append(price)
+        return closes
+
+    def test_disabled_by_default_so_behaviour_is_unchanged(self):
+        self.assertIsNone(self._prev,
+                          "curvature must ship off until measured")
+
+    def test_a_recovering_series_still_resolves_with_curvature_on(self):
+        closes = self._decelerating_decline_then_recovery()
+        bars = self._bars(closes)
+        C.MA_CURVATURE_LOOKBACK = None
+        without = C.evaluate_conditions("T", bars, bars, None)["stage"]
+        C.MA_CURVATURE_LOOKBACK = 10
+        with_curve = C.evaluate_conditions("T", bars, bars, None)["stage"]
+        # Not asserting which stage — only that arming the term is not
+        # inert and does not crash on a real shape.
+        self.assertTrue(without is not None or with_curve is not None)
+
+    def test_curvature_changes_at_least_some_verdicts(self):
+        """If every series scores identically either way, the parameter
+        does nothing and the experiment would be broken rather than the
+        idea being wrong — the lesson from the partial-exit A/B."""
+        # An advance that stalls while price is still above the average.
+        # The curvature branches only apply above the average, so a
+        # decelerating series that has already fallen through it can't
+        # exercise them — my first fixtures did exactly that and left the
+        # term looking inert.
+        closes = [100.0]
+        for _ in range(60):
+            closes.append(closes[-1] * 1.02)     # strong advance
+        for _ in range(30):
+            closes.append(closes[-1] * 1.001)    # stalls, stays above
+        bars = self._bars(closes)
+        C.MA_CURVATURE_LOOKBACK = None
+        without = C.evaluate_conditions("T", bars, bars, None)["stage"]
+        C.MA_CURVATURE_LOOKBACK = 10
+        with_curve = C.evaluate_conditions("T", bars, bars, None)["stage"]
+        self.assertNotEqual(without, with_curve,
+                            "curvature never altered any stage call")
+        self.assertEqual(without, 2, "a stalling advance reads Stage 2 on slope alone")
+        self.assertEqual(with_curve, 3, "decelerating above the average is a top forming")
+
+    def test_too_little_history_falls_back_rather_than_crashing(self):
+        C.MA_CURVATURE_LOOKBACK = 10
+        closes = [100.0] * 40
+        result = C.evaluate_conditions("T", self._bars(closes), self._bars(closes), None)
+        self.assertIn("stage", result)

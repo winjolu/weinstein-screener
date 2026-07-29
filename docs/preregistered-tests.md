@@ -201,3 +201,110 @@ method exists to catch is essentially never observed.
 ## Results
 
 *Nothing below this line until the runs are done. Appended, not edited.*
+
+### Run 2026-07-29
+
+**Universe** 2,627 mid-cap-or-larger names from the cache built
+2026-07-28. **Derivation** 2010-01-01 to 2020-12-31, **test**
+2021-01-01 to 2026-03-31, 4-week checkpoints, $1,000 a signal,
+`fetch_sector=False`, eight conditions in both windows as specified.
+
+**One correction to the instrument, made before the run and after the
+spec was committed.** Fills now happen at the bar the signal fired on
+rather than at the breakout bar. Scans find a breakout a median of four
+weeks after it happens, so filling at the old level books a rise that had
+already occurred — worth +1.11 points a trade on the earlier 273-trade
+study, which was the whole of its measured edge. That is a bug in the
+measuring instrument, not a change to any rule, and every arm below runs
+with it fixed.
+
+**Not run:** R6 (trader's-way exits) and R7 (moving-average variants)
+need code that still doesn't exist. Recorded as not-yet-run rather than
+dropped, so the denominator stays honest: six of eight arms were tested.
+
+#### Derivation — SPY buy-and-hold +13.61%/yr
+
+| arm | n | win | mean | peak/yr | avg/yr | short of index |
+|---|---|---|---|---|---|---|
+| R1 baseline | 6,151 | 40.1% | +1.84% | +1.95% | +4.57% | 9.0 pts |
+| R2 hard gates | 915 | 39.5% | +1.75% | +1.15% | +4.07% | 9.5 pts |
+| R3 stop-15% gate | 3,882 | 39.1% | +1.42% | +1.57% | +3.93% | 9.7 pts |
+| R4 extension gate | 5,598 | 39.8% | +1.50% | +1.59% | +3.89% | 9.7 pts |
+| R5 take-profit | 6,151 | 39.9% | +1.33% | +1.44% | +3.50% | 10.1 pts |
+| **R8 curvature** | 4,559 | **41.7%** | **+2.23%** | +2.10% | **+4.94%** | 8.7 pts |
+
+#### Test, out of sample — SPY buy-and-hold +11.78%/yr
+
+| arm | n | win | mean | peak/yr | avg/yr | short of index |
+|---|---|---|---|---|---|---|
+| R1 baseline | 3,804 | 37.7% | +1.10% | +1.24% | +3.47% | 8.3 pts |
+| R2 hard gates | 325 | 37.8% | +0.14% | +0.12% | +0.44% | 11.3 pts |
+| R3 stop-15% gate | 1,521 | 33.9% | +0.19% | +0.24% | +0.72% | 11.1 pts |
+| R4 extension gate | 3,052 | 36.1% | +0.10% | +0.13% | +0.36% | 11.4 pts |
+| R5 take-profit | 3,804 | 36.4% | **−0.12%** | −0.14% | −0.41% | 12.2 pts |
+| **R8 curvature** | 2,798 | 39.1% | **+1.29%** | +1.42% | **+3.86%** | 7.9 pts |
+
+### Verdict: every arm FAILS criterion (a)
+
+Not narrowly. The best arm is short of simply buying the index by 7.9
+points a year, out of sample, on 2,798 trades. Criterion (a) is decisive
+and no arm comes close.
+
+**The abandonment condition is met.** As written above: the conclusion
+recorded is that this method did not beat the index on this data, and the
+next step is a different question rather than another parameter.
+
+### What the arms actually showed
+
+**The baseline beat four of the five modifications.** Including both
+rules taken directly from the book. R2 — hard gates, the structure the
+source actually describes and the change I argued was most important —
+cut trades by 91% and returned +0.44% a year against the baseline's
++3.47%. Restoring the book's own structure made it worse.
+
+**R5 was the one I expected to work and it was the worst arm.** The
+reasoning was that it changes exits rather than removing trades, so
+unlike every filter it couldn't destroy the winners by excluding them.
+It destroyed them anyway, by capping them: banking half a position at 40%
+above the average takes the runners off precisely when they are running.
+Out of sample it turned a +1.10% average trade into −0.12%.
+
+**R8 was the only arm to improve on the baseline, and it did so in both
+windows** — +0.37 points a year in derivation, +0.39 out of sample, with
+a higher win rate in both. Consistent direction across an out-of-sample
+split is worth more than a larger one-off gain. But it is not
+significant: R8's bootstrap 5th percentile (+0.45%) sits below the
+baseline's mean (+1.10%), so the improvement cannot be distinguished from
+noise even at this sample size. And 0.4 points does not touch a 7.9-point
+deficit.
+
+### Correction to criterion (b)
+
+As registered it compares a resampled *mean* against the baseline's
+*median*. These returns are heavily skewed — test-window median −3.84%
+against a mean of +1.10% — so that bar is cleared by almost anything.
+Every arm passed (b) as written, including arms returning near zero. The
+criterion was close to vacuous.
+
+It changes no verdict, because (a) fails for every arm. But it was
+specified in advance, it was wrong, and it is recorded rather than
+quietly restated. A correct version compares mean to mean, under which
+no arm passes either.
+
+### What this does and does not establish
+
+It does **not** show stage analysis doesn't work. It shows *this
+implementation*, on this universe, over these windows, with eight
+conditions and no transaction costs, returned 3-4% a year where the index
+returned 11-14%.
+
+The standing caveats all point the same way: survivorship bias favours
+the strategy, no costs are modelled, and condition 5 was unavailable
+throughout. Removing those would widen the gap.
+
+The one thing measured here that clearly works is unchanged: condition 6
+kept the method out of the 2008 decline almost entirely, with a −9.7%
+worst drawdown against the index's −54.6%. The method is defensive and
+the defence is real. On this evidence it is not a way to make money
+relative to owning the index, and the low drawdown is what it buys in
+exchange for roughly a third of the return.

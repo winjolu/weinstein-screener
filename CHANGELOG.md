@@ -15,6 +15,58 @@ whereas a list of intentions needs pruning to stay honest.
 
 ## [Unreleased]
 
+### Investigated, no change made
+- **Ran the pre-registered tests on the full universe. Every arm failed,
+  and the abandonment condition I wrote in advance has fired.**
+
+  Six of eight registered rules, 2,627 mid-cap-or-larger names, derived
+  on 2010-2020 and tested out of sample on 2021-2026. Best arm returned
+  3.86% a year against the index's 11.78% — short by 7.9 points, on
+  2,798 out-of-sample trades. This is no longer the small-sample
+  ambiguity that muddied every earlier result; the baseline alone has
+  6,151 derivation trades against the 273 everything used to rest on.
+
+  Three findings I did not expect:
+
+  **The baseline beat four of the five modifications**, including both
+  rules taken straight from the book. R2 — hard gates instead of the
+  8-of-9 score, the change I'd argued was the most important thing in
+  the project — cut trades by 91% and returned +0.44% a year against the
+  baseline's +3.47%. Restoring the source's own structure made it worse.
+
+  **R5 was my pick to succeed and was the worst arm.** The argument was
+  that it changes exits rather than removing trades, so unlike every
+  filter it couldn't destroy the winners by excluding them. It destroyed
+  them by capping them instead: banking half a position at 40% above the
+  average takes the runners off exactly while they run. Out of sample it
+  turned a +1.10% average trade into -0.12%.
+
+  **R8 — curvature in the stage read — was the only arm to improve on
+  the baseline, and did so in both windows** (+0.37 points a year in
+  derivation, +0.39 out of sample, higher win rate in both). Consistency
+  across an out-of-sample split is worth more than a bigger one-off
+  number. It still isn't significant — its bootstrap 5th percentile sits
+  below the baseline's mean — and 0.4 points does not touch a 7.9-point
+  deficit.
+
+  I also have to record that criterion (b) as I wrote it was nearly
+  vacuous: it compares a resampled mean against the baseline's *median*,
+  and on a distribution skewed this hard (median -3.84%, mean +1.10%)
+  almost anything clears it. Every arm passed (b), including arms
+  returning zero. It changes no verdict, since (a) fails for all of
+  them, but I specified it in advance and got it wrong.
+
+  What this does not show is that stage analysis doesn't work. It shows
+  this implementation, on this universe, over these windows, with eight
+  conditions and no costs, earned roughly a third of what owning the
+  index earned. Every standing caveat — survivorship, no commissions,
+  condition 5 unavailable — points the same way and would widen the gap.
+
+  The one component that clearly works is unchanged: condition 6 kept
+  the method out of the 2008 decline almost entirely, at a -9.7% worst
+  drawdown against the index's -54.6%. The defence is real. It is bought
+  with about two thirds of the return.
+
 ### Added
 - `bar_cache.py`: the whole common-stock universe's weekly history, held
   locally. 5,808 symbols, 3.8 million bars, back to August 2003, in 350

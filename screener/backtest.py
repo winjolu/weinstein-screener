@@ -66,6 +66,17 @@ MIN_TRADES_FOR_CONFIDENCE = 30
 PARTIAL_EXIT_FRACTION = 0.5
 
 
+def _bar_index_on_or_before(bars_full, as_of_date):
+    """Index of the last bar dated on or before as_of_date, or None."""
+    found = None
+    for idx, bar_ in enumerate(bars_full):
+        if bar_["time"][:10] <= as_of_date:
+            found = idx
+        else:
+            break
+    return found
+
+
 def _truncate_bars(bars_full, as_of_date):
     """Keeps only bars dated on or before as_of_date (a "YYYY-MM-DD"
     string), comparing the date portion of each bar's ISO timestamp as a
@@ -135,9 +146,16 @@ def evaluate_as_of(ticker, as_of_date, bars_full, index_bars_full, sector_data_f
     return result
 
 
+def _ma_at(bars, period):
+    """The simple moving average on the last bar given, or None."""
+    from . import moving_averages
+    series = moving_averages.sma([b["close"] for b in bars], period)
+    return series[-1] if series else None
+
+
 def simulate_trade(ticker, entry_date, entry_price, swing_stop, swing_target, bars_full,
                     trailing_method='ma', max_hold_weeks=52,
-                    partial_exit_fraction=None):
+                    partial_exit_fraction=None, take_profit_above_ma_pct=None):
     """Walks forward week by week from entry_date, recomputing
     stop_loss.trailing_stop() using only bars up to and including each
     simulated week (a real trailing stop can only react to price action
@@ -206,6 +224,21 @@ def simulate_trade(ticker, entry_date, entry_price, swing_stop, swing_target, ba
             # Bank part of it and keep going; the rest belongs to the
             # trailing stop now.
             partial_idx, partial_price = idx, swing_target
+        elif (
+            take_profit_above_ma_pct is not None
+            and partial_idx is None
+        ):
+            # The book's second rule about stocks far above their average,
+            # and the one I'd missed. Its answer to a position that has
+            # skyrocketed is not "don't buy" — that's the entry rule — but
+            # "lock in the gain on part of it and ride the rest with a
+            # trailing stop". This is the only intervention tested here
+            # that removes no trades, so unlike every filter tried so far
+            # it cannot destroy the winners by excluding them.
+            ma_now = _ma_at(bars_so_far, conditions.MA_PERIOD)
+            if ma_now and (bar["high"] / ma_now - 1) * 100 >= take_profit_above_ma_pct:
+                partial_idx = idx
+                partial_price = ma_now * (1 + take_profit_above_ma_pct / 100)
 
     took_partial = partial_idx is not None
     remainder_closed = exit_idx is not None
@@ -266,7 +299,8 @@ def _lookback_weeks_needed(start_date):
 
 def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, parameter_set="baseline",
                   trailing_method='ma', max_hold_weeks=52, bars_by_symbol=None,
-                  fetch_sector=True, **condition_overrides):
+                  fetch_sector=True, entry_at="signal",
+                  take_profit_above_ma_pct=None, **condition_overrides):
     """Steps through start_date to end_date at check_interval_weeks
     intervals. At each checkpoint, evaluates each ticker as of that date
     and, if it comes back actionable with a real breakout bar to size
@@ -290,6 +324,15 @@ def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, paramete
         absent from the mapping are skipped rather than fetched, so a
         partial cache silently shrinks the universe instead of quietly
         going back to the network.
+    :param entry_at: "signal" (default) fills at the checkpoint the signal
+        fired on — the price actually available when the screener said
+        buy. "breakout" fills at the breakout bar instead, which models
+        the book's workflow of leaving resting buy-stop orders on a
+        pre-identified watchlist. The latter is only honest if such a
+        watchlist exists, and this screener doesn't maintain one: it
+        scans for breakouts that have already happened. Kept so earlier
+        results can be reproduced, not because both are equally valid
+        here.
     :param fetch_sector: set False to skip the per-ticker sector lookup
         and run an eight-condition checklist. Sector strength needs daily
         bars, which the server caps at ~4.8 years, so for any window
@@ -359,12 +402,27 @@ def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, paramete
             if breakout_idx is None:
                 continue
 
-            entry_price = bars_full[breakout_idx]["close"]
-            entry_date = bars_full[breakout_idx]["time"][:10]
+            if entry_at == "breakout":
+                entry_idx = breakout_idx
+            else:
+                # The bar the signal actually fired on. Anything else is a
+                # price no longer available: a scan finds a breakout a
+                # median of four weeks after it happened, and filling at
+                # the old level books a rise that had already occurred.
+                # Measured across the 273-trade study, that phantom gain
+                # was worth +1.11 points a trade — which was the whole of
+                # the measured edge, turning +$2,729 into -$296.
+                entry_idx = _bar_index_on_or_before(bars_full, as_of_date)
+                if entry_idx is None or entry_idx < breakout_idx:
+                    continue
+
+            entry_price = bars_full[entry_idx]["close"]
+            entry_date = bars_full[entry_idx]["time"][:10]
 
             trade = simulate_trade(
                 ticker, entry_date, entry_price, result["swing_stop"], result["swing_target"],
                 bars_full, trailing_method=trailing_method, max_hold_weeks=max_hold_weeks,
+                take_profit_above_ma_pct=take_profit_above_ma_pct,
             )
             if trade is None:
                 continue

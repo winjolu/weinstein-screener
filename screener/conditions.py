@@ -132,6 +132,22 @@ MA_PERIOD = 30
 MA_SLOPE_LOOKBACK = 5
 MA_SLOPE_THRESHOLD_PCT = 0.5
 
+# Require the average's slope to be *improving* before calling a Stage 1
+# to Stage 2 transition, not merely positive. None disables it, which is
+# the current behaviour.
+#
+# The book describes the transition as a shape: the average falls, flattens,
+# then curves up. A single slope reading can't see that — it answers "is it
+# rising", which is the first derivative, where the shape is the second. A
+# flat average reached by decelerating from a steep decline is the setup;
+# a flat average rolling over from an advance is the opposite, and they
+# read identically to one slope measurement.
+#
+# Circumstantial support, not a result: on a recent live scan 323 of 330
+# names classified Stage 2 and only 2 as Stage 1, so the transition the
+# method exists to catch is essentially never observed.
+MA_CURVATURE_LOOKBACK = None
+
 VOLUME_CONFIRM_RATIO = 2.0
 # My own reading of "contraction" for the pullback half of condition 3 —
 # the book doesn't give a number, so below-average (< 1.0x the trailing
@@ -243,6 +259,26 @@ def _classify_stage(closes, ma_series):
 
     rising = slope_pct > MA_SLOPE_THRESHOLD_PCT
     falling = slope_pct < -MA_SLOPE_THRESHOLD_PCT
+
+    if MA_CURVATURE_LOOKBACK:
+        # Compare this slope against the slope one window earlier. A
+        # decline that is easing counts as curving up even while still
+        # negative — that is precisely the flattening phase.
+        back = MA_CURVATURE_LOOKBACK
+        prior_idx = latest - back
+        if prior_idx - MA_SLOPE_LOOKBACK >= 0:
+            prior_now = wma_series[prior_idx]
+            prior_then = wma_series[prior_idx - MA_SLOPE_LOOKBACK]
+            if prior_now is not None and prior_then and prior_then != 0:
+                prior_slope = (prior_now - prior_then) / prior_then * 100
+                curving_up = slope_pct > prior_slope
+                if falling and price > ma_now and not curving_up:
+                    # Price above a falling average that is still
+                    # steepening is a bounce, not a base.
+                    return None
+                if rising and price > ma_now and not curving_up:
+                    # An advance already decelerating is late-stage.
+                    return 3
 
     if rising and price > ma_now:
         return 2
