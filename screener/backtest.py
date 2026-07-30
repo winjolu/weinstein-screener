@@ -444,3 +444,85 @@ def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, paramete
         print(f"{skipped} of {len(tickers)} tickers had no cached bars and were skipped")
 
     return trades
+
+
+def simulate_short_trade(ticker, entry_date, entry_price, buy_stop, target, bars_full,
+                          trailing_method='ma', max_hold_weeks=52,
+                          partial_exit_fraction=None):
+    """Mirror of simulate_trade for a short position.
+
+    Its own function rather than simulate_trade with negated inputs. A
+    buy-stop closing a short is a different order from a sell-stop
+    closing a long, and the geometry inverts in ways sign-flipping gets
+    subtly wrong: the stop sits *above* entry and ratchets *down*, the
+    target sits *below*, and profit is (entry - exit) rather than
+    (exit - entry).
+
+    Losses are bounded here exactly as they are on the long side. A short
+    at 40 with a buy-stop at 44 risks 10%, the same as a long at 40 with
+    a sell-stop at 36 — the book says so directly, and the "unlimited
+    risk" framing simply doesn't survive a protective stop being present.
+    """
+    if partial_exit_fraction is None:
+        partial_exit_fraction = PARTIAL_EXIT_FRACTION
+
+    dates = [b["time"][:10] for b in bars_full]
+    try:
+        entry_idx = dates.index(entry_date)
+    except ValueError:
+        return None
+
+    stop = buy_stop
+    last_idx = min(entry_idx + max_hold_weeks, len(bars_full) - 1)
+
+    partial_idx = partial_price = exit_idx = exit_price = None
+
+    for idx in range(entry_idx + 1, last_idx + 1):
+        bars_so_far = bars_full[:idx + 1]
+        trail = stop_loss.short_trailing_stop(
+            bars_so_far, entry_price, entry_idx, method=trailing_method)
+        if trail and trail.get("recommended") is not None:
+            # Ratchets DOWN only — the mirror of the long side's
+            # up-only rule, and the reason this can't be sign-flipped.
+            if stop is None or trail["recommended"] < stop:
+                stop = trail["recommended"]
+
+        bar = bars_full[idx]
+        if stop is not None and bar["high"] >= stop:
+            exit_idx, exit_price = idx, stop
+            break
+        if target is not None and partial_idx is None and bar["low"] <= target:
+            partial_idx, partial_price = idx, target
+
+    if exit_idx is None:
+        exit_idx = last_idx
+        exit_price = bars_full[last_idx]["close"]
+        still_open = True
+        exit_reason = "still_open"
+    else:
+        still_open = False
+        exit_reason = "target_then_stop" if partial_idx is not None else "stop"
+
+    if partial_idx is not None and not still_open:
+        blended = (partial_price * partial_exit_fraction
+                   + exit_price * (1 - partial_exit_fraction))
+    else:
+        blended = exit_price
+
+    # Profit on a short is entry minus exit.
+    return_pct = (entry_price - blended) / entry_price * 100 if entry_price else None
+    risk = buy_stop - entry_price if buy_stop is not None else None
+    r_multiple = ((entry_price - blended) / risk) if risk else None
+
+    return {
+        "ticker": ticker,
+        "entry_date": entry_date,
+        "entry_price": entry_price,
+        "exit_date": bars_full[exit_idx]["time"][:10],
+        "exit_price": blended,
+        "exit_reason": exit_reason,
+        "return_pct": return_pct,
+        "r_multiple": r_multiple,
+        "still_open": still_open,
+        "direction": "short",
+    }

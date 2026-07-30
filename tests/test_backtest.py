@@ -546,3 +546,96 @@ class MAStopBufferTest(unittest.TestCase):
         dip = tight * 0.98          # a pullback through the tight stop
         self.assertLess(dip, tight, "fixture must actually breach the tight stop")
         self.assertGreater(dip, loose, "the looser stop must survive it")
+
+
+class ShortTradeTest(unittest.TestCase):
+    """simulate_short_trade is its own function, not simulate_trade with
+    negated inputs. The geometry inverts in ways sign-flipping gets
+    subtly wrong: the stop sits above entry and ratchets down, the target
+    sits below, and profit is (entry - exit)."""
+
+    def _falling(self, n=80, start=200.0, rate=0.02):
+        dates = weekly_dates(n, "2019-01-04")
+        out, price = [], start
+        for d in dates:
+            out.append(bar(d, price * 1.02, price * 0.98, price))
+            price *= (1 - rate)
+        return out
+
+    def _rising(self, n=80, start=100.0, rate=0.03):
+        dates = weekly_dates(n, "2019-01-04")
+        out, price = [], start
+        for d in dates:
+            out.append(bar(d, price * 1.02, price * 0.98, price))
+            price *= (1 + rate)
+        return out
+
+    def test_a_falling_stock_is_profitable_to_be_short(self):
+        bars = self._falling()
+        entry = bars[40]["close"]
+        t = backtest.simulate_short_trade("AAA", bars[40]["time"][:10], entry,
+                                          entry * 1.10, entry * 0.5, bars)
+        self.assertIsNotNone(t)
+        self.assertGreater(t["return_pct"], 0,
+                           "short profit is entry minus exit")
+
+    def test_a_rising_stock_stops_the_short_out_for_a_loss(self):
+        bars = self._rising()
+        entry = bars[40]["close"]
+        t = backtest.simulate_short_trade("AAA", bars[40]["time"][:10], entry,
+                                          entry * 1.10, entry * 0.5, bars)
+        self.assertIsNotNone(t)
+        self.assertLess(t["return_pct"], 0)
+        self.assertEqual(t["exit_reason"], "stop")
+
+    def test_the_loss_is_bounded_by_the_buy_stop(self):
+        """The book's own point: a short at 40 with a buy-stop at 44 risks
+        10%, exactly as a long at 40 stopped at 36 does. 'Unlimited risk'
+        does not survive a protective stop."""
+        bars = self._rising(rate=0.10)      # violent advance against us
+        entry = bars[40]["close"]
+        t = backtest.simulate_short_trade("AAA", bars[40]["time"][:10], entry,
+                                          entry * 1.10, entry * 0.5, bars)
+        self.assertGreater(t["return_pct"], -11.0,
+                           "loss must be capped near the 10% buy-stop")
+
+    def test_the_stop_ratchets_down_never_up(self):
+        """The mirror of the long side's up-only rule.
+
+        The distinguishing case is a decline followed by a bounce. A stop
+        that has trailed down gets hit by the bounce and banks the gain;
+        one that only moved up sits too high to trigger and the position
+        rides back to break-even. Asserting merely that the exit is below
+        the initial stop passes either way — my first version did, and a
+        mutation reversing the comparison survived it.
+        """
+        dates = weekly_dates(80, "2019-01-04")
+        closes, price = [], 200.0
+        for i in range(80):
+            if i < 55:
+                price *= 0.97          # sustained decline
+            else:
+                price *= 1.05          # sharp bounce back
+            closes.append(price)
+        bars = [bar(d, c * 1.02, c * 0.98, c) for d, c in zip(dates, closes)]
+        entry = bars[20]["close"]
+        t = backtest.simulate_short_trade("AAA", bars[20]["time"][:10], entry,
+                                          entry * 1.10, None, bars,
+                                          max_hold_weeks=60)
+        self.assertIsNotNone(t)
+        self.assertFalse(t["still_open"], "the bounce should have covered the short")
+        self.assertGreater(t["return_pct"], 0,
+                           "a trailed stop banks the decline; an untrailed one gives it back")
+        self.assertLess(t["exit_price"], entry,
+                        "the covering stop must have trailed below the entry")
+
+    def test_it_is_tagged_as_a_short(self):
+        bars = self._falling()
+        t = backtest.simulate_short_trade("AAA", bars[40]["time"][:10],
+                                          bars[40]["close"], bars[40]["close"] * 1.1,
+                                          None, bars)
+        self.assertEqual(t["direction"], "short")
+
+    def test_an_unknown_entry_date_returns_none(self):
+        self.assertIsNone(backtest.simulate_short_trade(
+            "AAA", "1990-01-01", 100.0, 110.0, 50.0, self._falling()))
