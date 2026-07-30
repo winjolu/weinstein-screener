@@ -28,6 +28,21 @@ def _date(value):
     return datetime.date.fromisoformat(value[:10])
 
 
+def _safe_cagr(ending, starting, years):
+    """Compound annual rate, returning -1.0 when the account is wiped out.
+
+    Python's ** on a negative base with a fractional exponent returns a
+    complex number rather than raising, so a strategy that lost more than
+    its capital produced a CAGR that printed as "-1.89+26.38j%" and
+    passed through every downstream format string unnoticed.
+    """
+    if starting <= 0:
+        return float("nan")
+    if ending <= 0:
+        return -1.0
+    return (ending / starting) ** (1 / years) - 1
+
+
 def _resolved(trades):
     """Trades that actually finished. An open trade has no return yet,
     and counting it as zero would quietly dilute everything."""
@@ -129,7 +144,14 @@ def simulate_account(trades, stake=1000.0):
     # Compound annual growth rate — the yearly rate that turns the
     # starting capital into the ending capital over this many years.
     # Reported because a raw total over 11 years flatters itself.
-    cagr = ((capital_required + realised) / capital_required) ** (1 / years) - 1
+    #
+    # Guarded because losses can exceed the capital base. A fractional
+    # power of a negative number is complex in Python rather than an
+    # error, so an arm that lost more than it started with silently
+    # reported a CAGR like "-1.89+26.38j%" — which formats without
+    # complaint and is meaningless. An account wiped out past zero is
+    # -100% a year and there is nothing further to compound.
+    cagr = _safe_cagr(capital_required + realised, capital_required, years)
 
     # The same figure against average rather than peak capital. This is
     # the strategy's return per dollar-year of exposure, and it's the
@@ -138,7 +160,7 @@ def simulate_account(trades, stake=1000.0):
     # account to the average and still take every signal at the peak.
     avg_capital = (position_days / max((end - start).days, 1)) * stake
     if avg_capital > 0:
-        cagr_on_average = ((avg_capital + realised) / avg_capital) ** (1 / years) - 1
+        cagr_on_average = _safe_cagr(avg_capital + realised, avg_capital, years)
     else:
         cagr_on_average = float("nan")
 
@@ -220,7 +242,7 @@ def simulate_compounded(trades, stake=1000.0):
         "starting_capital": starting,
         "ending_equity": equity,
         "total_return_pct": (equity / starting - 1) * 100,
-        "cagr_pct": ((equity / starting) ** (1 / years) - 1) * 100 if equity > 0 else -100.0,
+        "cagr_pct": _safe_cagr(equity, starting, years) * 100,
         "worst_drawdown_pct": worst_drawdown_pct,
         "years": years,
     }
