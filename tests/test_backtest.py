@@ -639,3 +639,76 @@ class ShortTradeTest(unittest.TestCase):
     def test_an_unknown_entry_date_returns_none(self):
         self.assertIsNone(backtest.simulate_short_trade(
             "AAA", "1990-01-01", 100.0, 110.0, 50.0, self._falling()))
+
+
+class ShortRunnerTest(unittest.TestCase):
+    """run_short_backtest walks the same structure as the long runner but
+    evaluates the short checklist and simulates a short."""
+
+    def setUp(self):
+        self._real_eval = None
+        self._real_index = backtest.data_fetch.get_index_bars
+        backtest.data_fetch.get_index_bars = lambda *a, **kw: _flat_bars(300)
+        from screener import short_conditions
+        self.sc = short_conditions
+        self._real_short_eval = short_conditions.evaluate_short_conditions
+
+    def tearDown(self):
+        backtest.data_fetch.get_index_bars = self._real_index
+        self.sc.evaluate_short_conditions = self._real_short_eval
+
+    def _falling_bars(self, n=200):
+        dates = weekly_dates(n, "2019-01-04")
+        out, price = [], 300.0
+        for d in dates:
+            out.append(bar(d, price * 1.02, price * 0.98, price))
+            price *= 0.985
+        return out
+
+    def _patch_eval(self, buy_stop_factor, actionable=True):
+        bars = self._falling_bars()
+
+        def fake(ticker, b, idx, sector):
+            price = b[-1]["close"] if b else 100.0
+            return {"scoring": {"actionable": actionable}, "conditions_met": 7,
+                    "buy_stop": price * buy_stop_factor, "target": price * 0.5}
+
+        self.sc.evaluate_short_conditions = fake
+        return bars
+
+    def test_it_produces_short_trades(self):
+        bars = self._patch_eval(1.10)
+        trades = backtest.run_short_backtest(
+            ["AAA"], bars[100]["time"][:10], bars[180]["time"][:10],
+            parameter_set="test_shortrunner", bars_by_symbol={"AAA": bars, "SPY": bars},
+            fetch_sector=False)
+        self.assertTrue(trades)
+        self.assertEqual(trades[0]["direction"], "short")
+
+    def test_a_stop_below_the_entry_is_refused_not_invented(self):
+        """A short's protective stop must sit above entry. A level read
+        that puts it below describes a malformed setup, and guessing a
+        replacement would manufacture a trade that never existed."""
+        bars = self._patch_eval(0.90)      # stop below entry — malformed
+        trades = backtest.run_short_backtest(
+            ["AAA"], bars[100]["time"][:10], bars[180]["time"][:10],
+            parameter_set="test_shortrunner_bad",
+            bars_by_symbol={"AAA": bars, "SPY": bars}, fetch_sector=False)
+        self.assertEqual(trades, [])
+
+    def test_a_non_actionable_verdict_produces_nothing(self):
+        bars = self._patch_eval(1.10, actionable=False)
+        trades = backtest.run_short_backtest(
+            ["AAA"], bars[100]["time"][:10], bars[180]["time"][:10],
+            parameter_set="test_shortrunner_none",
+            bars_by_symbol={"AAA": bars, "SPY": bars}, fetch_sector=False)
+        self.assertEqual(trades, [])
+
+    def test_entries_are_never_before_the_signal(self):
+        bars = self._patch_eval(1.10)
+        trades = backtest.run_short_backtest(
+            ["AAA"], bars[100]["time"][:10], bars[180]["time"][:10],
+            parameter_set="test_shortrunner_dates",
+            bars_by_symbol={"AAA": bars, "SPY": bars}, fetch_sector=False)
+        for t in trades:
+            self.assertLessEqual(t["entry_date"], t["as_of_date"])
