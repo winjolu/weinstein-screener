@@ -386,3 +386,41 @@ that this doesn't beat the index and the next question is a different one.
 ### Results
 
 *Nothing below this line until the runs are done.*
+
+---
+
+## Batch 3 — registered 2026-07-29, after R9 failed
+
+R9 loosened the trailing stop and made things monotonically worse:
++1.84% a trade on the line, −0.11% at 5% below, −3.26% at 10%, −7.74% at
+15%, with the win rate collapsing from 40% to 20%. The prediction was
+that a looser stop would let winners run. It didn't.
+
+The trade counts explain why, and they point somewhere else. Loosening
+took the count from 6,151 to 692, because a position that stays open
+blocks later checkpoints on the same ticker. The stop wasn't holding
+winners longer — it was holding *losers* longer and losing more on each.
+
+### R13 — Maximum holding period `[defect]`
+`max_hold_weeks`, currently 52. Every trade is force-closed after a
+year no matter what price is doing. A stock trending for three years is
+cut at one, and no stop setting can reach that — which makes it a better
+candidate than R9 was for the 2% capture rate, and a different mechanism
+entirely.
+
+Sweep 52 (current), 104, 156, and effectively unlimited (520).
+
+**Expectation, recorded before running:** genuinely uncertain, and I want
+that on the record given the run of wrong calls. The argument for is that
+a year is arbitrary and the method is explicitly about multi-year
+advances. The argument against is that R9 also looked obviously right and
+wasn't — and longer holds have the same checkpoint-blocking side effect
+that made R9 worse, so this could fail the same way for the same reason.
+
+If it fails, the shared mechanism becomes the finding: any change that
+keeps positions open longer reduces trade count faster than it improves
+per-trade return, and that is a property of the harness rather than of
+the market.
+
+### Criteria
+Unchanged from batch 2, including the corrected (b).

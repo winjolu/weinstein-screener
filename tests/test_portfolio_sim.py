@@ -257,3 +257,35 @@ class UncertaintyTest(unittest.TestCase):
 
     def test_too_few_trades_returns_none(self):
         self.assertIsNone(portfolio_sim.roi_uncertainty([]))
+
+
+class WipeoutCagrTest(unittest.TestCase):
+    """Losses can exceed the capital base. Python's ** returns a complex
+    number for a fractional power of a negative rather than raising, so
+    an arm that lost more than it started with reported a CAGR of
+    "-1.89+26.38j%" — which formats cleanly and means nothing."""
+
+    def test_a_wiped_out_account_reports_minus_one_hundred_percent(self):
+        trades = [_trade("2024-01-05", "2025-01-03", -150.0)]
+        acct = portfolio_sim.simulate_account(trades, stake=1000.0)
+        self.assertIsInstance(acct["cagr_pct"], float)
+        self.assertAlmostEqual(acct["cagr_pct"], -100.0)
+
+    def test_no_reported_rate_is_ever_complex(self):
+        for pct in (-500.0, -150.0, -100.0, -99.0, 0.0, 250.0):
+            acct = portfolio_sim.simulate_account(
+                [_trade("2024-01-05", "2025-01-03", pct)], stake=1000.0)
+            for key in ("cagr_pct", "cagr_on_average_pct"):
+                self.assertIsInstance(acct[key], float,
+                                      f"{key} went complex at {pct}%")
+
+    def test_the_compounded_view_is_guarded_too(self):
+        comp = portfolio_sim.simulate_compounded(
+            [_trade("2024-01-05", "2025-01-03", -150.0)], stake=1000.0)
+        self.assertIsInstance(comp["cagr_pct"], float)
+        self.assertAlmostEqual(comp["cagr_pct"], -100.0)
+
+    def test_ordinary_results_are_unaffected(self):
+        acct = portfolio_sim.simulate_account(
+            [_trade("2024-01-05", "2025-01-03", 100.0)], stake=1000.0)
+        self.assertAlmostEqual(acct["cagr_pct"], 100.0, delta=1.0)
