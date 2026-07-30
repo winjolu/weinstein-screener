@@ -526,3 +526,113 @@ def simulate_short_trade(ticker, entry_date, entry_price, buy_stop, target, bars
         "still_open": still_open,
         "direction": "short",
     }
+
+
+def run_short_backtest(tickers, start_date, end_date, check_interval_weeks=4,
+                        parameter_set="short_baseline", max_hold_weeks=52,
+                        bars_by_symbol=None, fetch_sector=True):
+    """The short-side mirror of run_backtest.
+
+    Structurally the same walk — checkpoints, one position at a time per
+    ticker, entry at the bar the signal fired on — but evaluating the
+    short checklist and simulating a short position.
+
+    `direction` isn't a column on backtest_trades, which holds real
+    history and isn't in the rebuildable set, so a schema change would
+    need a migration. Short runs are distinguished by their
+    parameter_set name instead, which is enough for every reader that
+    exists.
+    """
+    from . import short_conditions
+
+    lookback_weeks = _lookback_weeks_needed(start_date)
+    lookback_days = (datetime.date.today() - datetime.date.fromisoformat(start_date)).days + 45
+    checkpoints = _checkpoint_dates(start_date, end_date, check_interval_weeks)
+
+    if bars_by_symbol is not None and "SPY" in bars_by_symbol:
+        index_bars_full = bars_by_symbol["SPY"]
+    else:
+        index_bars_full = data_fetch.get_index_bars("SPY", lookback_weeks=lookback_weeks)
+
+    empty_sector = {"sector": None, "sector_etf_bars": [], "spy_bars": []}
+    trades = []
+    skipped = 0
+
+    for ticker in tickers:
+        if bars_by_symbol is not None:
+            bars_full = bars_by_symbol.get(ticker)
+            if not bars_full:
+                skipped += 1
+                continue
+            sector_data_full = (
+                data_fetch.get_sector_data_for_backtest(ticker, lookback_days)
+                if fetch_sector else empty_sector
+            )
+        else:
+            try:
+                bars_full = data_fetch.get_weekly_bars(ticker, lookback_weeks=lookback_weeks)
+                sector_data_full = (
+                    data_fetch.get_sector_data_for_backtest(ticker, lookback_days)
+                    if fetch_sector else empty_sector
+                )
+            except Exception as exc:
+                print(f"[{ticker}] short backtest skipped — fetch failed: {exc}")
+                continue
+
+        in_trade_until = None
+        for as_of_date in checkpoints:
+            if in_trade_until is not None and as_of_date <= in_trade_until:
+                continue
+
+            bars = _truncate_bars(bars_full, as_of_date)
+            index_bars = _truncate_bars(index_bars_full, as_of_date)
+            sector_data = {
+                "sector": sector_data_full.get("sector"),
+                "sector_strength_pct": None,
+                "sector_etf_closes": [b["close"] for b in
+                                      _truncate_bars(sector_data_full.get("sector_etf_bars") or [],
+                                                     as_of_date)],
+                "spy_daily_closes": [b["close"] for b in
+                                     _truncate_bars(sector_data_full.get("spy_bars") or [],
+                                                    as_of_date)],
+            }
+            try:
+                result = short_conditions.evaluate_short_conditions(
+                    ticker, bars, index_bars, sector_data)
+            except Exception as exc:
+                print(f"[{ticker}] {as_of_date} short evaluation failed — {exc}")
+                continue
+
+            if not result["scoring"]["actionable"]:
+                continue
+            if result["buy_stop"] is None:
+                continue
+
+            entry_idx = _bar_index_on_or_before(bars_full, as_of_date)
+            if entry_idx is None:
+                continue
+            entry_price = bars_full[entry_idx]["close"]
+            if result["buy_stop"] <= entry_price:
+                # A protective stop has to sit above a short's entry. If
+                # the level read puts it below, the setup is malformed
+                # rather than merely unattractive — skip rather than
+                # inventing a stop.
+                continue
+
+            trade = simulate_short_trade(
+                ticker, bars_full[entry_idx]["time"][:10], entry_price,
+                result["buy_stop"], result["target"], bars_full,
+                max_hold_weeks=max_hold_weeks)
+            if trade is None:
+                continue
+
+            trade["as_of_date"] = as_of_date
+            trade["conditions_met"] = result["conditions_met"]
+            trade["parameter_set"] = parameter_set
+            trades.append(trade)
+            db.insert_backtest_trade(trade)
+            in_trade_until = trade["exit_date"] or end_date
+
+    if skipped:
+        print(f"{skipped} of {len(tickers)} tickers had no cached bars and were skipped")
+    return trades
