@@ -16,6 +16,22 @@ from . import moving_averages, trend_support_resistance
 # without getting stopped out on ordinary noise.
 MA_TRAIL_BUFFER_PCT = 5.0
 
+# How far BELOW the 30-week average the trailing stop actually sits.
+#
+# The book says to place the stop below the average, not on it. This code
+# placed it exactly at the average, which is a materially tighter stop:
+# any ordinary pullback that touches the line closes the position. That
+# is the mechanism behind the worst measured behaviour in the project —
+# across 1,168 stocks that rose more than 20% over the 2021-2026 window,
+# averaging +270%, the system captured 5.0%. A capture rate of 2%.
+# GOOGL in miniature: bought 280.64, stopped at 286.01 for +1.9%, then
+# ran to 400 without us.
+#
+# The book is also explicit that while price is above a rising average in
+# Stage 2 fashion, the position should be given plenty of room to gyrate.
+# Zero preserves the old behaviour; this ships at zero until measured.
+MA_STOP_BUFFER_PCT = 0.0
+
 # Pivot length used to find swing lows/highs to trail. Deliberately
 # shorter than trend_support_resistance's TSR_PIVOT_LENGTH (20, tuned for
 # resistance/support levels that need to be "major") — a trailing stop
@@ -86,8 +102,9 @@ def _trailing_ma_stop(bars, entry_idx, ma_period):
         if ma_val is None:
             continue
         comfortably_above = closes[idx] > ma_val * (1 + MA_TRAIL_BUFFER_PCT / 100)
-        if comfortably_above and (stop is None or ma_val > stop):
-            stop = ma_val
+        level = ma_val * (1 - MA_STOP_BUFFER_PCT / 100)
+        if comfortably_above and (stop is None or level > stop):
+            stop = level
     return stop
 
 

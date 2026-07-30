@@ -545,3 +545,69 @@ class CurvatureStageTest(unittest.TestCase):
         closes = [100.0] * 40
         result = C.evaluate_conditions("T", self._bars(closes), self._bars(closes), None)
         self.assertIn("stage", result)
+
+
+class ContinuationEntryTest(unittest.TestCase):
+    """Re-entry into a trend already underway.
+
+    The book describes selling well above the average and repurchasing on
+    dips back toward it. The screener only ever recognised breakout
+    entries, so a stop-out was usually terminal — mid-trend there is no
+    resistance left for condition 7 to confirm. Measured over 2021-2026
+    it took a median of 2 trades per stock in five years and captured 2%
+    of the available advance.
+    """
+
+    def setUp(self):
+        self._prev = C.CONTINUATION_ENTRY_MAX_PCT_ABOVE_MA
+
+    def tearDown(self):
+        C.CONTINUATION_ENTRY_MAX_PCT_ABOVE_MA = self._prev
+
+    def _established_uptrend(self, n=140):
+        """Long rise, then a shallow pullback that stays above the
+        average. Eight weeks of decline took price *through* the line and
+        read as Stage 3 — which is correct behaviour, and the wrong
+        fixture for testing a continuation."""
+        closes, price = [], 100.0
+        for _ in range(n - 4):
+            closes.append(price)
+            price *= 1.012
+        for _ in range(4):
+            price *= 0.985
+            closes.append(price)
+        return [bar(d, c * 1.01, c * 0.99, c)
+                for d, c in zip(weekly_dates(len(closes)), closes)]
+
+    def test_defaults_to_off(self):
+        self.assertIsNone(self._prev)
+
+    def test_arming_it_marks_a_continuation_setup(self):
+        bars = self._established_uptrend()
+        C.CONTINUATION_ENTRY_MAX_PCT_ABOVE_MA = None
+        off = C.evaluate_conditions("T", bars, bars, None)
+        C.CONTINUATION_ENTRY_MAX_PCT_ABOVE_MA = 25.0
+        on = C.evaluate_conditions("T", bars, bars, None)
+        self.assertFalse(off["continuation_entry"])
+        self.assertTrue(on["continuation_entry"],
+                        "a pullback toward a rising average should qualify")
+
+    def test_it_never_relaxes_the_trend_conditions(self):
+        """It stands in for the entry trigger only. Stage, the average and
+        the market read still have to pass on their own terms."""
+        falling = [bar(d, c * 1.01, c * 0.99, c)
+                   for d, c in zip(weekly_dates(140),
+                                   [200.0 * (0.98 ** i) for i in range(140)])]
+        C.CONTINUATION_ENTRY_MAX_PCT_ABOVE_MA = 25.0
+        result = C.evaluate_conditions("T", falling, falling, None)
+        self.assertFalse(result["continuation_entry"],
+                         "a downtrend must never qualify as a continuation")
+
+    def test_a_stock_far_above_its_average_does_not_qualify(self):
+        """The point is a pullback *toward* the line, not a runaway."""
+        runaway = [bar(d, c * 1.01, c * 0.99, c)
+                   for d, c in zip(weekly_dates(140),
+                                   [100.0 * (1.04 ** i) for i in range(140)])]
+        C.CONTINUATION_ENTRY_MAX_PCT_ABOVE_MA = 15.0
+        result = C.evaluate_conditions("T", runaway, runaway, None)
+        self.assertFalse(result["continuation_entry"])

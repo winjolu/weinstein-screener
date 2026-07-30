@@ -87,6 +87,25 @@ NON_NEGOTIABLE_CONDITIONS = ("stage_setup", "price_above_ma", "market_stage")
 # this is meant to close.
 MAX_EXTENSION_ABOVE_MA_PCT = None
 
+# Continuation entries: buying a stock already in Stage 2 that has pulled
+# back toward its rising average, rather than requiring a fresh breakout
+# through resistance.
+#
+# The book describes this as the trader's re-entry — after selling well
+# above the average, repurchase on dips back close to it. The screener
+# only ever recognises breakout entries, which is why a stop-out is
+# usually terminal: the stock is mid-trend, resistance was cleared long
+# ago, and condition 7 has nothing left to confirm. Measured over the
+# 2021-2026 window it took a median of 2 trades per stock across five
+# years and captured 2% of the available advance.
+#
+# A continuation setup requires the trend intact (Stage 2, price above a
+# rising average) and price within this distance of the average — close
+# enough that the stop sits near, which is the whole point.
+#
+# None disables it, which is current behaviour.
+CONTINUATION_ENTRY_MAX_PCT_ABOVE_MA = None
+
 # Kept for reference: the legacy absolute threshold this replaced.
 ACTIONABLE_THRESHOLD = 8
 
@@ -664,6 +683,7 @@ def _empty_result():
         "historical_levels": None, "new_52w_high": None, "breakout_idx": None,
         "breakout_age_weeks": None, "base_is_tight": None, "base_range_pct": None,
         "extension_above_ma_pct": None,
+        "continuation_entry": False,
     }
 
 
@@ -766,6 +786,16 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
     # where there is no fill bar to speak of.
     _entry_idx = breakout_idx if breakout_idx is not None else latest_idx
     _ma_at_entry = ma_series[_entry_idx] if _entry_idx < len(ma_series) else None
+    if not _ma_at_entry:
+        # The breakout can predate the average's warm-up, in which case
+        # there is no reading at that bar. Falling back to the latest bar
+        # is right in substance — the question is how extended the
+        # position is — and it also closes a silent hole: returning None
+        # here made the extension gate un-fireable on exactly those
+        # setups, so R4 was inactive for an unknown share of trades
+        # without anything in the output saying so.
+        _entry_idx = latest_idx
+        _ma_at_entry = ma_now
     extension_above_ma_pct = (
         None if not _ma_at_entry else (closes[_entry_idx] / _ma_at_entry - 1) * 100
     )
@@ -856,6 +886,25 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
     swing_target, swing_stop, risk_reward, risk_reward_detail = _evaluate_risk_reward(
         highs, lows, closes, resistance_level, breakout_idx, base_start, base["base_end"]
     )
+
+    # A continuation setup stands in for the breakout trigger when the
+    # trend is already established. It never relaxes the trend conditions
+    # themselves — stage, the average, relative strength and the market
+    # read all still have to pass on their own terms.
+    continuation_entry = False
+    if (
+        CONTINUATION_ENTRY_MAX_PCT_ABOVE_MA is not None
+        and stage == 2
+        and price_above_ma is True
+        and ma_rising is True
+        and extension_above_ma_pct is not None
+        and 0 <= extension_above_ma_pct <= CONTINUATION_ENTRY_MAX_PCT_ABOVE_MA
+    ):
+        continuation_entry = True
+        if resistance_breakout is None:
+            resistance_breakout = True
+        if pullback_quality is None:
+            pullback_quality = True
 
     conditions = {
         "stage_setup": stage_setup,
@@ -948,6 +997,7 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         "base_is_tight": base["base_is_tight"],
         "base_range_pct": base["base_range_pct"],
         "extension_above_ma_pct": extension_above_ma_pct,
+        "continuation_entry": continuation_entry,
     }
 
 

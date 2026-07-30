@@ -308,3 +308,81 @@ worst drawdown against the index's −54.6%. The method is defensive and
 the defence is real. On this evidence it is not a way to make money
 relative to owning the index, and the low drawdown is what you get in
 exchange for roughly a third of the return.
+
+---
+
+## Batch 2 — registered 2026-07-29, after the first batch failed
+
+The first batch established that no variation of the *existing* logic
+beats the index. What it also showed, and what this batch responds to,
+is where the failure actually sits. Across the 2021-2026 window the
+system traded 1,168 stocks that rose more than 20% — averaging +270% —
+and captured 5.0% of that. A 2% capture rate. On the 455 that fell more
+than 20%, averaging -58%, it lost 2.4%.
+
+That is not a system picking the wrong stocks. It is a system that is
+very good at not losing money and nearly incapable of making any. The
+first batch varied entry filters, which is the half that was already
+working.
+
+`[defect]` marks a rule addressing a measured failure of the
+implementation rather than a reading of the book. Weaker provenance than
+`[book]` but stronger than `[data]`: the defect was measured, the fix is
+a hypothesis about it.
+
+### R9 — Loosen the trailing stop `[book]` `[defect]`
+`MA_STOP_BUFFER_PCT`, placing the trailing stop a set distance *below*
+the 30-week average rather than exactly on it.
+
+The book says to place the stop below the average, and separately that
+while price is above a rising average in Stage 2 the position should be
+given plenty of room to gyrate. This code put the stop on the line, so
+any pullback that touches it closes the position. GOOGL is the case in
+miniature: bought 280.64, stopped at 286.01 for +1.9%, then ran to 400.
+
+Sweep 0 (current), 5, 10, 15%.
+
+### R10 — Weekly checkpoints `[defect]`
+`check_interval_weeks=1` instead of 4. The screener found GOOGL's
+breakout four weeks late and refused SNDX through a 55% advance while
+reporting conditions unresolved. Cheapest possible test of entry lag.
+
+### R11 — Continuation entries `[book]` `[defect]`
+`CONTINUATION_ENTRY_MAX_PCT_ABOVE_MA`, admitting a stock already in
+Stage 2 that has pulled back near its rising average, without requiring
+a fresh breakout.
+
+The book describes this as the trader's re-entry — sell well above the
+average, repurchase on dips back toward it. Only breakout entries exist
+today, which is why a stop-out is usually terminal: mid-trend there is
+no resistance left for condition 7 to confirm. Median 2 trades per stock
+across five years.
+
+Sweep 10, 20, 30%.
+
+### R12 — The short side `[book]`
+`short_conditions.py`. Not the long checklist inverted — the book's
+asymmetries are implemented explicitly: volume is never a gate on a
+breakdown (only a bonus), the preferred entry is the rally back to the
+broken level on light volume, and stage alone justifies a short with no
+fundamental input existing at all.
+
+Measured on its own and combined with the long side, since the case for
+it is that capital sits idle through declines.
+
+### Success criteria — unchanged, with (b) corrected
+
+Criterion (a) stands exactly as before: CAGR on average capital must
+exceed SPY's over the test window.
+
+Criterion (b) is corrected to compare the arm's bootstrap 5th percentile
+against the baseline's **mean**, not its median. As originally written it
+compared a resampled mean to a median and was cleared by almost anything;
+that error is recorded above rather than hidden, and this is the fix.
+
+**Same abandonment condition.** If no arm satisfies (a), the answer is
+that this doesn't beat the index and the next question is a different one.
+
+### Results
+
+*Nothing below this line until the runs are done.*

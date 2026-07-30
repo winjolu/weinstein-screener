@@ -499,3 +499,50 @@ class ExtensionProfitTakingTest(unittest.TestCase):
     # changelog already records making this mistake once with the
     # partial-exit tests; the rule here is that tests assert mechanics
     # and the backtest answers the market question.
+
+
+class MAStopBufferTest(unittest.TestCase):
+    """The book says to place the stop *below* the 30-week average. This
+    code placed it exactly on the line, which is materially tighter —
+    any pullback that touches the average closes the position. That is
+    the mechanism behind a 2% capture rate on stocks that averaged +270%.
+    """
+
+    def setUp(self):
+        self._prev = stop_loss.MA_STOP_BUFFER_PCT
+
+    def tearDown(self):
+        stop_loss.MA_STOP_BUFFER_PCT = self._prev
+
+    def _rising(self, n=90):
+        dates = weekly_dates(n, "2019-01-04")
+        out, price = [], 100.0
+        for d in dates:
+            out.append(bar(d, price * 1.03, price * 0.97, price))
+            price *= 1.01
+        return out
+
+    def test_defaults_to_zero_so_behaviour_is_unchanged(self):
+        self.assertEqual(self._prev, 0.0)
+
+    def test_a_buffer_places_the_stop_below_the_average(self):
+        bars = self._rising()
+        stop_loss.MA_STOP_BUFFER_PCT = 0.0
+        on_line = stop_loss.trailing_stop(bars, bars[40]["close"], 40, method="ma")
+        stop_loss.MA_STOP_BUFFER_PCT = 8.0
+        below = stop_loss.trailing_stop(bars, bars[40]["close"], 40, method="ma")
+        self.assertIsNotNone(on_line["recommended"])
+        self.assertIsNotNone(below["recommended"])
+        self.assertLess(below["recommended"], on_line["recommended"],
+                        "a buffer must lower the stop, not leave it on the line")
+
+    def test_a_looser_stop_survives_a_pullback_that_would_have_closed(self):
+        """The whole point: room to gyrate while the trend is intact."""
+        bars = self._rising()
+        stop_loss.MA_STOP_BUFFER_PCT = 0.0
+        tight = stop_loss.trailing_stop(bars, bars[40]["close"], 40, method="ma")["recommended"]
+        stop_loss.MA_STOP_BUFFER_PCT = 10.0
+        loose = stop_loss.trailing_stop(bars, bars[40]["close"], 40, method="ma")["recommended"]
+        dip = tight * 0.98          # a pullback through the tight stop
+        self.assertLess(dip, tight, "fixture must actually breach the tight stop")
+        self.assertGreater(dip, loose, "the looser stop must survive it")
