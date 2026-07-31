@@ -15,6 +15,24 @@ whereas a list of intentions needs pruning to stay honest.
 
 ## [Unreleased]
 
+### Fixed
+- A losing arm reported its annual return as a complex number. When
+  realised losses exceed the capital base, the CAGR calculation takes a
+  fractional power of a negative, and Python returns a complex value
+  rather than raising — so the figure printed as "-1.89+26.38j%",
+  formatted cleanly, and passed through every downstream format string.
+  An account wiped out past zero is -100% a year and there is nothing
+  further to compound.
+- An experiment harness bug that nearly cost the only positive result of
+  the night. `kwargs.pop()` against a module-level arm list consumed the
+  value during the derivation phase, so the test phase silently fell back
+  to the default and the weekly-checkpoint arm ran as the baseline —
+  reporting byte-identical numbers. I would otherwise have written that
+  weekly checkpoints fail out of sample, which is precisely the shape of
+  a real finding and would have been false. Caught only by the standing
+  rule that two arms agreeing exactly means a broken experiment rather
+  than an inert change.
+
 ### Investigated, no change made
 - **Ran the pre-registered tests on the full universe. Every arm failed,
   and the abandonment condition I wrote in advance has fired.**

@@ -466,3 +466,28 @@ directly: re-entry is available, it just isn't profitable. Worth noting
 the book pairs that re-entry with the trader's tighter stops and faster
 exits, and it has been implemented here inside the investor's framework.
 That is a caveat on the finding, not a rescue of it.
+
+### Batch 2 results — test window, 2021-2026 (SPY +11.78%/yr)
+
+| arm | n | win | mean | avg/yr | vs index |
+|---|---|---|---|---|---|
+| R1 baseline | 3,804 | 37.7% | +1.10% | +3.47% | −8.3 |
+| R9 stop 5% below | 2,906 | 37.1% | −0.21% | −0.53% | −12.3 |
+| R9 stop 10% below | 2,242 | 32.0% | −3.09% | −8.59% | −20.4 |
+| R9 stop 15% below | 1,778 | 28.0% | −5.94% | −20.02% | −31.8 |
+| R11 continuation | 4,993 | 37.5% | +0.73% | +2.35% | −9.4 |
+| R10 weekly | *invalidated — see below* | | | | |
+
+**All arms fail criterion (a).** R9 fails monotonically in both windows,
+so its failure is real rather than a fluke of one period. R11 fails in
+both windows while demonstrably firing (2,067 trades unique to it out of
+sample, 4,220 in derivation), so re-entry on a pullback without a fresh
+breakout is genuinely a weaker setup rather than an unimplemented one.
+
+**R10's test arm was invalid and is being re-run.** The harness used
+`kwargs.pop()` against a module-level arm list; the derivation phase
+consumed `check_interval_weeks=1`, so the test phase fell back to 4 and
+the arm ran as the baseline, reporting byte-identical figures. Recorded
+here rather than silently re-run, because the alternative was reporting
+that the one promising change failed out of sample — a plausible,
+clean, entirely false finding.
