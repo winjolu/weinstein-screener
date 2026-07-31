@@ -424,3 +424,45 @@ the market.
 
 ### Criteria
 Unchanged from batch 2, including the corrected (b).
+
+### R14 — Weekly checkpoints with a long maximum hold `[defect]`
+`check_interval_weeks=1` and `max_hold_weeks=520` together.
+
+Registered **before** R13 reports, and specified as a fixed pair rather
+than "weekly plus whatever hold turns out best" — the latter would be
+choosing the combination after seeing which half worked, which is the
+thing this file exists to prevent.
+
+The two address opposite ends of the same diagnosis. Weekly checkpoints
+attack entry lag, which is the half already confirmed: R10 improved on
+the baseline in derivation on every measure (+2.46% a trade against
++1.84%, 41.5% win against 40.1%, nearly double the total). A long hold
+attacks the forced exit, which is the remaining untested candidate for
+the 2% capture rate.
+
+If R13 fails on its own, this arm still runs as registered. A
+combination can behave differently from either part, and dropping it
+after seeing a disappointing single would be the same selective
+reporting in reverse.
+
+### Derivation results so far, recorded before the test window returns
+
+| arm | n | win | mean | avg/yr |
+|---|---|---|---|---|
+| R10 weekly checkpoints | 8,940 | 41.5% | **+2.46%** | **+5.55%** |
+| R1 baseline | 6,151 | 40.1% | +1.84% | +4.57% |
+| R11 continuation entries | 8,134 | 39.6% | +1.45% | +3.67% |
+| R9 stop 5% below | 3,469 | 35.6% | −0.11% | −0.28% |
+| R9 stop 10% below | 2,310 | 28.9% | −3.26% | −18.99% |
+| R9 stop 15% below | 1,771 | 23.3% | −6.25% | −100.00% |
+
+R10 is the only arm across both batches to improve the baseline by a
+margin worth the name, and it is the cheapest change of any tested —
+look weekly instead of monthly.
+
+R11 fires rather than sitting inert (4,220 trades unique to it, 2,107
+displaced) and still underperforms, which answers the re-entry question
+directly: re-entry is available, it just isn't profitable. Worth noting
+the book pairs that re-entry with the trader's tighter stops and faster
+exits, and it has been implemented here inside the investor's framework.
+That is a caveat on the finding, not a rescue of it.
