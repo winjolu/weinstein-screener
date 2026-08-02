@@ -52,6 +52,16 @@ def _percentile(values, fraction):
     return ordered[min(int(len(ordered) * fraction), len(ordered) - 1)]
 
 
+def _payoff(wins, losses):
+    """Average win over average loss, or NaN when undefined."""
+    if not wins or not losses:
+        return float("nan")
+    mean_loss = abs(statistics.mean(losses))
+    if mean_loss == 0:
+        return float("nan")
+    return statistics.mean(wins) / mean_loss
+
+
 def _resolved(trades):
     """Trades that actually finished. An open trade has no return yet,
     and counting it as zero would quietly dilute everything."""
@@ -83,8 +93,11 @@ def summarise_trades(trades, stake=1000.0):
         # "Payoff" = average win divided by average loss. Above 1 means
         # winners are bigger than losers, which is how a strategy can be
         # profitable while being wrong most of the time.
-        "payoff": (statistics.mean(wins) / abs(statistics.mean(losses)))
-                  if wins and losses else float("nan"),
+        # Guarded against a zero denominator. A trade returning exactly
+        # 0% is counted as a loss, so a sample whose only non-winners are
+        # flat gives mean(losses) == 0 and divides by zero. Rare in real
+        # data and trivial to hit in a test.
+        "payoff": _payoff(wins, losses),
         "mean_pct": statistics.mean(returns),
         "median_pct": statistics.median(returns),
         "best_pct": max(returns),
