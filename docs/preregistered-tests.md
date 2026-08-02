@@ -775,3 +775,57 @@ no edge in either direction.
 pass. Criterion (a) has not been met in any window where the index
 compounded normally. The 2005-2009 result flatters every arm because
 the index returned +0.80% there.
+
+---
+
+## Batch 8 — is the mined rule a plateau or a knife edge? Registered 2026-07-29
+
+R20 passed both criteria out of sample (+11.99%/yr against SPY's
++11.78%, bootstrap p5 +3.38% against the baseline's +1.10% mean). The
+mined filter carries most of that.
+
+The filter's thresholds — relative strength > 20, price > 7% below the
+52-week high, base > 35% wide — were rounded outward from fitted
+quintile edges (20.8, 7.9, 36.1). **Rounding outward is not the same as
+being insensitive to the values.** If the rule only works at those exact
+settings it is a fitted curve wearing a rule's clothing; if it works
+across a broad range it is describing something real about markets.
+
+**This is the test I would weight most heavily before treating any of
+this as tradeable**, more than another window would add.
+
+### Design
+One threshold varied at a time from the centre (20 / 7 / 35), holding
+the other two fixed. Full R20 configuration otherwise — dropped
+conditions, weekly checkpoints, no hold cap — so this measures
+sensitivity of the system as it would actually run.
+
+| arm | RS | below high | base |
+|---|---|---|---|
+| S0 centre | 20 | 7 | 35 |
+| S1 | **15** | 7 | 35 |
+| S2 | **25** | 7 | 35 |
+| S3 | 20 | **5** | 35 |
+| S4 | 20 | **10** | 35 |
+| S5 | 20 | 7 | **30** |
+| S6 | 20 | 7 | **40** |
+
+All three windows.
+
+### How to read it
+**Plateau** — returns stay materially above baseline across every
+variant. The rule survives; the exact numbers don't matter much.
+
+**Knife edge** — the centre wins and neighbours collapse toward
+baseline. Then it is fitted, the out-of-sample passes were luck of the
+threshold, and it should not be traded.
+
+**Monotonic drift** — performance climbs steadily with one threshold,
+meaning the true optimum lies outside the range tested and the rounding
+was in the wrong direction. Would need a wider sweep, registered
+separately, before believing any single setting.
+
+**Expectation:** genuinely uncertain, which is why it is worth running.
+The rule replicated across three windows, which argues real. It was also
+selected from 25 looks, which argues fitted. Sensitivity is what
+separates those two stories.
