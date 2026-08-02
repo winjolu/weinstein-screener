@@ -224,6 +224,178 @@ def simulate_account(trades, stake=1000.0):
     }
 
 
+def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
+                            cash_yield_pct=0.0, priority=None):
+    """What a real account with a fixed amount of money would have done.
+
+    simulate_account() takes every signal and reports the answer against
+    two denominators, peak capital and average capital. Peak is harsh —
+    it sizes the account for the single busiest week of a decade — and
+    average is unachievable, since nobody can hold the average and still
+    fund the peak. The true answer sits between them and neither figure
+    can reach it.
+
+    This closes that gap the way reality does: start with `capital`, put
+    `stake` into each signal as it arrives, and when the cash is gone,
+    miss the rest. Missing signals is not a modelling choice here, it is
+    what having finite money means.
+
+    The one judgement call is which signals get skipped when several
+    arrive the same week and only some can be funded. There is no
+    principled ordering, so `seed` shuffles the tie and callers should
+    run several — if the answer moves much between seeds, the result
+    depends on an arbitrary choice and should not be trusted. With
+    seed=None the order is alphabetical by ticker, which is stable and
+    equally arbitrary.
+
+    `cash_yield_pct` is the annual rate earned on money not currently in
+    a position. It defaults to zero, which is the conservative reading
+    and also the wrong one: this strategy holds a great deal of cash, and
+    comparing idle cash against a fully-invested index while paying it
+    nothing charges the strategy for a cost it would not really bear.
+    Over 2021-2026 short-term cash paid roughly 4%, which on a book that
+    is two-thirds in cash is worth well over two points a year — enough
+    to change a conclusion. Left off by default so it is always an
+    explicit choice rather than a quiet assist.
+
+    :return: dict including `skipped`, which is the figure to watch. A
+        high skip rate means the reported return belongs to a different
+        and much more selective strategy than the one that was tested.
+        `deployed_vs_start_pct` says how much of the money was at work.
+    """
+    done = _resolved(trades)
+    if not done:
+        return None
+
+    by_entry = sorted(done, key=lambda t: (_date(t["entry_date"]), t["ticker"]))
+    if priority is not None:
+        # Rank competing signals instead of taking them arbitrarily. This
+        # only bites when the account cannot fund everything, which is
+        # the normal case: at $25,000 an account funds about one signal
+        # in seven, so the ordering decides most of the return.
+        #
+        # Applied before the seed shuffle deliberately — the shuffle then
+        # only breaks ties *within* a priority level, so a seed sweep
+        # still measures the noise left after ranking rather than
+        # undoing the ranking.
+        by_entry.sort(key=lambda t: (_date(t["entry_date"]), -priority(t)))
+    if seed is not None:
+        import random
+        rng = random.Random(seed)
+
+        # The shuffle runs inside each group of signals that are
+        # genuinely interchangeable. Without a priority that means
+        # "same day"; with one it means "same day and same rank", so the
+        # shuffle randomises what the ranking left undecided instead of
+        # discarding the ranking outright.
+        def group_key(trade):
+            if priority is None:
+                return (_date(trade["entry_date"]),)
+            return (_date(trade["entry_date"]), priority(trade))
+
+        grouped, i = [], 0
+        while i < len(by_entry):
+            j = i
+            while j < len(by_entry) and group_key(by_entry[j]) == group_key(by_entry[i]):
+                j += 1
+            tied = by_entry[i:j]
+            rng.shuffle(tied)
+            grouped.extend(tied)
+            i = j
+        by_entry = grouped
+
+    # Exits sort ahead of entries on the same date: money freed by a sale
+    # is available to the next buy. Doing it the other way round
+    # understates capacity for no reason. The sort is stable, so the
+    # entry order established above (seeded or alphabetical) survives it.
+    events = ([(_date(t["exit_date"]), 0, "exit", t) for t in done]
+              + [(_date(t["entry_date"]), 1, "entry", t) for t in by_entry])
+    events.sort(key=lambda e: (e[0], e[1]))
+
+    cash = float(capital)
+    open_count = 0
+    peak_open = 0
+    taken, skipped = 0, 0
+    realised = 0.0
+    interest = 0.0
+    curve = []
+    deployed_day_dollars = 0.0
+    elapsed_days = 0
+    last_when = events[0][0]
+    rate = cash_yield_pct / 100.0
+
+    for when, _order, kind, trade in events:
+        days = (when - last_when).days
+        if days:
+            deployed_day_dollars += open_count * stake * days
+            elapsed_days += days
+            if rate:
+                earned = cash * rate * days / 365.25
+                cash += earned
+                interest += earned
+            last_when = when
+
+        if kind == "exit":
+            if trade.get("_funded"):
+                proceeds = stake * (1 + trade["return_pct"] / 100.0)
+                cash += proceeds
+                realised += proceeds - stake
+                open_count -= 1
+                curve.append((when, cash + open_count * stake))
+        elif cash >= stake:
+            cash -= stake
+            open_count += 1
+            peak_open = max(peak_open, open_count)
+            trade["_funded"] = True
+            taken += 1
+        else:
+            trade["_funded"] = False
+            skipped += 1
+
+    for trade in done:
+        trade.pop("_funded", None)
+
+    start = min(_date(t["entry_date"]) for t in done)
+    end = max(_date(t["exit_date"]) for t in done)
+    years = max((end - start).days / 365.25, 1e-9)
+    # _resolved() has already dropped anything still open, so every
+    # funded position has been drained by now and the cash is the whole
+    # account. Asserted rather than written as `cash + open_count *
+    # stake`, which reads as if it handles a case that cannot occur —
+    # and which no test could ever exercise.
+    assert open_count == 0, "a funded position was never closed out"
+    ending = cash
+
+    worst_drawdown = 0.0
+    running_peak = float(capital)
+    for _, value in curve:
+        running_peak = max(running_peak, value)
+        worst_drawdown = min(worst_drawdown, value - running_peak)
+
+    return {
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "years": years,
+        "capital": float(capital),
+        "ending_equity": ending,
+        "realised_profit": realised,
+        "interest_earned": interest,
+        # Money at work, measured against the *starting* balance. It
+        # can exceed 100%: a winning account compounds, and thirty
+        # $1,000 positions on an account that began with $25,000 is a
+        # real state of affairs rather than an accounting error.
+        "deployed_vs_start_pct": (deployed_day_dollars / (elapsed_days * capital) * 100
+                                  if elapsed_days and capital else 0.0),
+        "taken": taken,
+        "skipped": skipped,
+        "skip_rate_pct": skipped / (taken + skipped) * 100 if (taken + skipped) else 0.0,
+        "peak_positions": peak_open,
+        "total_return_pct": (ending - capital) / capital * 100,
+        "cagr_pct": _safe_cagr(ending, capital, years) * 100,
+        "worst_drawdown": worst_drawdown,
+    }
+
+
 def simulate_compounded(trades, stake=1000.0):
     """The same trades, but with profits put back to work.
 
