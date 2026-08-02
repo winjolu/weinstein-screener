@@ -10,6 +10,7 @@ that truncation happens, it checks that the answer is *identical*
 whether or not future data was ever present in the input. If any future
 bar leaked into a calculation, the two would diverge.
 """
+import datetime
 import unittest
 
 from screener import backtest, stop_loss
@@ -712,3 +713,112 @@ class ShortRunnerTest(unittest.TestCase):
             bars_by_symbol={"AAA": bars, "SPY": bars}, fetch_sector=False)
         for t in trades:
             self.assertLessEqual(t["entry_date"], t["as_of_date"])
+
+
+class StallExitTest(unittest.TestCase):
+    """R6, the only registered exit that sells on time rather than on
+    price. Everything else in simulate_trade waits for price to reach a
+    level, so a position that goes sideways holds capital indefinitely
+    once the hold cap is loosened.
+    """
+
+    def _bars(self, closes):
+        dates = weekly_dates(len(closes))
+        return [bar(d, c * 1.01, c * 0.99, c) for d, c in zip(dates, closes)]
+
+    def _flat_trade(self, **kw):
+        # 40 weeks of warm-up so the trailing stop's 30-week average
+        # exists, then a position that drifts sideways just under the
+        # entry price and never approaches either the stop or the target.
+        #
+        # Every post-entry close sits *below* the entry deliberately. An
+        # earlier version let a few weeks close above it, which meant the
+        # exit week was decided by the price path rather than by the week
+        # count — and an off-by-one in the timing then passed the test.
+        closes = [60.0 + i for i in range(40)] + [98.5, 98.0, 98.4, 97.8,
+                                                  98.2, 97.9, 98.3, 98.1]
+        bars = self._bars(closes)
+        return backtest.simulate_trade(
+            "T", bars[39]["time"][:10], 99.0,
+            swing_stop=80.0, swing_target=200.0, bars_full=bars, **kw
+        )
+
+    def test_a_flat_position_stays_open_without_the_stall_exit(self):
+        # Establishes the baseline the feature is meant to change. If
+        # this trade closed on its own, the test below would prove
+        # nothing about the stall exit.
+        trade = self._flat_trade()
+        self.assertTrue(trade["still_open"])
+
+    def test_the_stall_exit_closes_a_flat_position(self):
+        trade = self._flat_trade(stall_exit_weeks=4)
+        self.assertFalse(trade["still_open"])
+        self.assertEqual(trade["exit_reason"], "stall")
+
+    def test_it_waits_the_full_number_of_weeks(self):
+        trade = self._flat_trade(stall_exit_weeks=4)
+        entry = datetime.date.fromisoformat(trade["entry_date"])
+        exit_ = datetime.date.fromisoformat(trade["exit_date"])
+        self.assertEqual((exit_ - entry).days // 7, 4)
+
+    def test_it_exits_at_that_week_s_close(self):
+        # Not the high or the low. A stall exit is a decision made after
+        # the week has played out, so the close is the only price that
+        # was actually available to act on.
+        trade = self._flat_trade(stall_exit_weeks=4)
+        self.assertAlmostEqual(trade["exit_price"], 97.8)
+
+    def test_a_banked_partial_protects_the_remainder(self):
+        # Once the target has paid out, the position has proved itself
+        # and the remainder belongs to the trailing stop. The gain
+        # threshold here is set absurdly high so that without this guard
+        # the remainder would certainly be stalled out.
+        closes = ([60.0 + i for i in range(40)]
+                  + [110.0, 125.0, 130.0, 129.0, 130.0, 129.0, 130.0])
+        bars = self._bars(closes)
+        trade = backtest.simulate_trade(
+            "T", bars[39]["time"][:10], 99.0, swing_stop=80.0,
+            swing_target=120.0, bars_full=bars,
+            stall_exit_weeks=2, stall_exit_min_gain_pct=50.0)
+        # Asserting the outcome, not the label. Removing the guard closes
+        # this position early but reports it as "target_then_stop",
+        # because the partial leg wins the naming — so a check on
+        # exit_reason alone passes against the broken version.
+        self.assertTrue(trade["still_open"])
+        self.assertEqual(trade["exit_reason"], "target_then_open")
+
+    def test_a_position_in_profit_is_not_stalled_out(self):
+        # The gain threshold is what separates "going nowhere" from
+        # "going slowly". A rising position must survive the check.
+        closes = [60.0 + i for i in range(40)] + [101.0, 104.0, 107.0,
+                                                  110.0, 113.0, 116.0]
+        bars = self._bars(closes)
+        trade = backtest.simulate_trade(
+            "T", bars[39]["time"][:10], 99.0,
+            swing_stop=80.0, swing_target=200.0, bars_full=bars,
+            stall_exit_weeks=4)
+        self.assertNotEqual(trade["exit_reason"], "stall")
+
+    def test_the_gain_threshold_is_applied(self):
+        # Same flat trade, but now demanding a 10% gain by week 4. The
+        # position is slightly *up* at that point in this variant, so
+        # only the threshold can trigger the exit — this fails if the
+        # parameter is ignored and zero is used instead.
+        closes = [60.0 + i for i in range(40)] + [100.0, 101.0, 101.5,
+                                                  102.0, 102.5, 103.0]
+        bars = self._bars(closes)
+        lenient = backtest.simulate_trade(
+            "T", bars[39]["time"][:10], 99.0, swing_stop=80.0,
+            swing_target=200.0, bars_full=bars, stall_exit_weeks=4)
+        strict = backtest.simulate_trade(
+            "T", bars[39]["time"][:10], 99.0, swing_stop=80.0,
+            swing_target=200.0, bars_full=bars, stall_exit_weeks=4,
+            stall_exit_min_gain_pct=10.0)
+        self.assertNotEqual(lenient["exit_reason"], "stall")
+        self.assertEqual(strict["exit_reason"], "stall")
+
+    def test_off_by_default_so_existing_results_are_unaffected(self):
+        with_param = self._flat_trade(stall_exit_weeks=None)
+        without = self._flat_trade()
+        self.assertEqual(with_param, without)
+        self.assertTrue(without["still_open"])

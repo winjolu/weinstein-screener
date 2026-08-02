@@ -155,7 +155,8 @@ def _ma_at(bars, period):
 
 def simulate_trade(ticker, entry_date, entry_price, swing_stop, swing_target, bars_full,
                     trailing_method='ma', max_hold_weeks=52,
-                    partial_exit_fraction=None, take_profit_above_ma_pct=None):
+                    partial_exit_fraction=None, take_profit_above_ma_pct=None,
+                    stall_exit_weeks=None, stall_exit_min_gain_pct=0.0):
     """Walks forward week by week from entry_date, recomputing
     stop_loss.trailing_stop() using only bars up to and including each
     simulated week (a real trailing stop can only react to price action
@@ -178,6 +179,18 @@ def simulate_trade(ticker, entry_date, entry_price, swing_stop, swing_target, ba
     remainder closing both come back as "still_open", even when a
     partial profit was already banked: the trade's final number isn't
     known yet, and counting an unrealised remainder would flatter it.
+
+    `stall_exit_weeks` is the one exit here that sells on *time* rather
+    than on price. If the position is still open that many weeks in and
+    hasn't cleared `stall_exit_min_gain_pct`, it closes at that week's
+    close. Every other exit in this function waits for price to come to
+    it, so a trade that simply goes sideways ties up capital forever —
+    and with the hold cap removed, "forever" is literal. This is the
+    registered R6 arm, unbuilt until now.
+
+    It deliberately does not fire once a partial has been banked: at
+    that point the position has already proved itself and the remainder
+    is the trailing stop's business.
 
     :return: trade dict, or None if entry_date has no matching bar.
         return_pct and r_multiple are position-weighted across both legs.
@@ -204,6 +217,7 @@ def simulate_trade(ticker, entry_date, entry_price, swing_stop, swing_target, ba
     partial_price = None
     exit_idx = None
     exit_price = None
+    stalled = False
 
     for idx in range(entry_idx + 1, last_idx + 1):
         bars_so_far = bars_full[:idx + 1]
@@ -240,6 +254,20 @@ def simulate_trade(ticker, entry_date, entry_price, swing_stop, swing_target, ba
                 partial_idx = idx
                 partial_price = ma_now * (1 + take_profit_above_ma_pct / 100)
 
+        # Checked last, so the stop and the target both get the week
+        # first. A stall exit is the weakest claim on the position of
+        # the three — it isn't reacting to anything price did, only to
+        # how long price has done nothing.
+        if (
+            stall_exit_weeks is not None
+            and partial_idx is None
+            and idx - entry_idx >= stall_exit_weeks
+            and (bar["close"] - entry_price) / entry_price * 100 < stall_exit_min_gain_pct
+        ):
+            exit_idx, exit_price = idx, bar["close"]
+            stalled = True
+            break
+
     took_partial = partial_idx is not None
     remainder_closed = exit_idx is not None
 
@@ -262,7 +290,7 @@ def simulate_trade(ticker, entry_date, entry_price, swing_stop, swing_target, ba
         exit_reason = "target_then_stop"
     else:
         blended_exit = exit_price
-        exit_reason = "stop"
+        exit_reason = "stall" if stalled else "stop"
 
     return {
         "ticker": ticker,
@@ -300,7 +328,9 @@ def _lookback_weeks_needed(start_date):
 def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, parameter_set="baseline",
                   trailing_method='ma', max_hold_weeks=52, bars_by_symbol=None,
                   fetch_sector=True, entry_at="signal",
-                  take_profit_above_ma_pct=None, **condition_overrides):
+                  take_profit_above_ma_pct=None,
+                  stall_exit_weeks=None, stall_exit_min_gain_pct=0.0,
+                  **condition_overrides):
     """Steps through start_date to end_date at check_interval_weeks
     intervals. At each checkpoint, evaluates each ticker as of that date
     and, if it comes back actionable with a real breakout bar to size
@@ -339,6 +369,11 @@ def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, paramete
         starting before roughly 2021 condition 5 cannot resolve anyway —
         fetching it spends one call per ticker to learn nothing. Turning
         it off is honest about that rather than paying for it.
+    :param stall_exit_weeks: sell a position that is still open this many
+        weeks in and hasn't cleared stall_exit_min_gain_pct. Off by
+        default. This is the only exit that frees capital on its own
+        schedule rather than waiting for price, which matters once
+        max_hold_weeks is loosened — see simulate_trade().
     :param condition_overrides: passed to conditions.py's module-level
         constants for the duration of this run only — see
         _condition_overrides(). Example: TSR_PIVOT_LENGTH=10.
@@ -423,6 +458,8 @@ def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, paramete
                 ticker, entry_date, entry_price, result["swing_stop"], result["swing_target"],
                 bars_full, trailing_method=trailing_method, max_hold_weeks=max_hold_weeks,
                 take_profit_above_ma_pct=take_profit_above_ma_pct,
+                stall_exit_weeks=stall_exit_weeks,
+                stall_exit_min_gain_pct=stall_exit_min_gain_pct,
             )
             if trade is None:
                 continue
