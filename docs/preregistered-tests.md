@@ -685,3 +685,44 @@ period never used to derive anything.
 the strength of the replication already seen. Whether they beat the
 index on *peak* capital is the open question — the mined filter is
 highly selective, and selectivity leaves capital idle.
+
+---
+
+## Batch 7 — do the hard gates earn their place? Registered 2026-07-29
+
+Three conditions never vary inside the trade set — `stage_setup`,
+`price_above_ma`, `market_stage` — because a trade cannot exist unless
+they pass. Their constancy has been recorded throughout as a selection
+artifact rather than evidence they work, and testing them needs them
+*removed*, not scored.
+
+**We have never checked whether requiring price above the 30-week
+average helps.** It is the most load-bearing assumption in the project
+and it is entirely untested. Same for the market-stage read, which is
+the one component with a demonstrated benefit (it kept the method out of
+2008) but has never been measured against the cost of the trades it
+refuses.
+
+Each arm removes one condition from `NON_NEGOTIABLE_CONDITIONS`, leaving
+it in the ratio. So the question is precisely "does this need to be a
+veto, or is being one voice among several enough?"
+
+Base configuration is weekly checkpoints with no hold cap — the
+best-measured setup so far, so these test the gates on the system we
+would actually run rather than on the original baseline.
+
+### G1 — price_above_ma not a veto `[structural]`
+### G2 — market_stage not a veto `[structural]`
+### G3 — stage_setup not a veto `[structural]`
+### G4 — none of the three a veto `[structural]`
+
+Run on all three windows.
+
+**Expectation:** G2 loosens the crash protection, so I expect it to look
+fine in the two bull windows and worse in 2005-2009 — which would be the
+first result where a component's value shows up only in the period that
+contains a crash. If that pattern appears it is worth more than the
+arithmetic, because it is the shape the whole method claims to have.
+
+G1 I genuinely don't know. Every other "obvious" gate tested tonight has
+either done nothing or hurt.

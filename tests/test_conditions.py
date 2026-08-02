@@ -893,3 +893,49 @@ class ApplyDisabledTest(unittest.TestCase):
         out = C._apply_disabled({n: True for n in C.CONDITION_NAMES})
         self.assertEqual(sum(1 for v in out.values() if v is True),
                          len(C.CONDITION_NAMES) - 1)
+
+
+class ResolvedFloorAdaptsTest(unittest.TestCase):
+    """Dropping a condition must not make the checklist unreachable.
+
+    The floor was counted against all nine conditions while dropping a
+    condition shrinks the pool it is measured against. With sector
+    strength unavailable — true for any window before ~2021 — at most
+    eight resolve, so dropping two left six against a floor of seven.
+    The arms that dropped volume and risk/reward returned zero trades in
+    all three windows, which reads as "rejects everything" and was
+    actually "cannot be satisfied".
+    """
+
+    def setUp(self):
+        self._prev = C.DISABLED_CONDITIONS
+
+    def tearDown(self):
+        C.DISABLED_CONDITIONS = self._prev
+
+    def test_floor_is_unchanged_when_nothing_is_dropped(self):
+        C.DISABLED_CONDITIONS = ()
+        self.assertEqual(C._effective_resolved_floor(), C.MIN_RESOLVED_CONDITIONS)
+
+    def test_floor_drops_by_one_per_disabled_condition(self):
+        C.DISABLED_CONDITIONS = ("volume_confirmation",)
+        self.assertEqual(C._effective_resolved_floor(), C.MIN_RESOLVED_CONDITIONS - 1)
+        C.DISABLED_CONDITIONS = ("volume_confirmation", "risk_reward")
+        self.assertEqual(C._effective_resolved_floor(), C.MIN_RESOLVED_CONDITIONS - 2)
+
+    def test_the_floor_never_erodes_to_nothing(self):
+        C.DISABLED_CONDITIONS = tuple(C.CONDITION_NAMES)
+        self.assertGreaterEqual(C._effective_resolved_floor(), 4)
+
+    def test_a_setup_can_still_qualify_with_two_conditions_dropped(self):
+        """The arithmetic that was impossible before: six resolved
+        against a floor that adapts to six."""
+        C.DISABLED_CONDITIONS = ("volume_confirmation", "risk_reward")
+        conds = {n: True for n in C.CONDITION_NAMES}
+        conds["volume_confirmation"] = None
+        conds["risk_reward"] = None
+        conds["sector_strength"] = None      # unavailable pre-2021
+        s = C.score_conditions(conds)
+        self.assertEqual(s["resolved"], 6)
+        self.assertTrue(s["actionable"],
+                        "dropping conditions must not make qualification impossible")
