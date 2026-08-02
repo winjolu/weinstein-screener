@@ -866,3 +866,622 @@ replication alongside the three time windows.
 threshold overfitting — a threshold fitted to a period reproduces across
 both halves of that same period perfectly well. Batch 8 remains the test
 that decides whether the mined filter is real or fitted.
+
+---
+
+## Batch 10 — R21, the two strongest parts without the rest. Registered 2026-08-02
+
+R20 changes four things at once and passed. That leaves it unclear how
+much of the pass came from the two components that measured best on
+their own — the mined entry filter (R19) and dropping the risk/reward
+ceiling (R17) — versus the two scheduling changes bundled with them
+(weekly checkpoints, no hold cap).
+
+### R21 — mined filter + drop risk/reward `[data]`
+`MINED_ENTRY_FILTER = True`, `DISABLED_CONDITIONS = ("risk_reward",)`,
+weekly checkpoints and no hold cap held at the R20 setting so the only
+difference from R20 is that volume confirmation stays *in*.
+
+Registered as a decomposition, not a search. If R21 matches R20, then
+volume confirmation is confirmed inert for a third time and the simpler
+rule should be preferred. If R21 is clearly worse, dropping volume was
+carrying more than the per-condition analysis suggested, and that
+analysis needs revisiting.
+
+**Expectation:** R21 lands within noise of R20. Volume measured +1.84%
+either way at the condition level and has never moved a result since.
+
+### Criteria
+Unchanged: average-capital return against buy-and-hold, plus the
+bootstrap p5 against the baseline mean, reported on all three windows.
+
+---
+
+## Batch 11 — the short side, re-run against the corrected floor. Registered 2026-08-02
+
+The original short backtest produced 123 trades. At the time I read
+that as the short setup simply being rare. It is now more likely an
+artifact: the same evidence-floor arithmetic that silently made R18 and
+R20 un-qualifiable was in force, and the short module has *fewer*
+resolvable conditions than the long side to begin with — no fundamental
+input exists for it at all, so it starts closer to the floor.
+
+### S7 — short side with the adaptive floor `[defect]`
+Re-run the short backtest unchanged except that
+`_effective_resolved_floor()` governs qualification. No threshold is
+being tuned; this asks whether the original 123 trades were a real
+scarcity or a starved sample.
+
+**Expectation:** trade count rises substantially. Per-trade return is
+genuinely unknown — a starved sample is not biased in a predictable
+direction, so this could go either way, and a larger sample that
+performs *worse* is a perfectly plausible outcome worth reporting as
+loudly as a good one.
+
+**Standing caveat, unchanged.** Short results carry an execution cost
+this engine does not model: borrow fees, hard-to-borrow names, and the
+possibility of a forced buy-in. Any positive short result should be
+discounted for that before it means anything, and I should not treat a
+marginal short edge as tradeable.
+
+---
+
+## Batch 7 results — the vetoes are redundant, not wrong
+
+Complete on both windows that have a matched reference arm. The
+2005-2009 reference is what batch 9 exists to supply, so the holdout is
+not scored here.
+
+A note on how nearly this went wrong: I read G4 mid-run at 1,764 trades
+and it looked like a serious bug, because removing every veto is a
+strict relaxation and cannot *lose* 9,138 trades. It was an unfinished
+arm. Polling the count twice caught it.
+
+2010-2020, weekly checkpoints, no hold cap. SPY returned +13.61%/yr.
+
+| arm | trades | added | removed | win | mean | avg capital |
+|---|---|---|---|---|---|---|
+| all three vetoes (reference) | 10,898 | — | — | 44.2% | +4.55% | +7.72% |
+| no price-above-MA veto | 10,898 | 0 | 0 | 44.2% | +4.55% | +7.72% |
+| no market-stage veto | 10,904 | 16 | 10 | 44.3% | +4.56% | +7.72% |
+| no stage-setup veto | 10,898 | 0 | 0 | 44.2% | +4.55% | +7.72% |
+
+And on the test window, 2021-2026, SPY +11.78%/yr:
+
+| arm | trades | added | removed | win | mean | $100k account |
+|---|---|---|---|---|---|---|
+| all three vetoes (reference) | 5,923 | — | — | 39.2% | +2.70% | +7.26%/yr |
+| no price-above-MA veto | 5,923 | 0 | 0 | 39.2% | +2.70% | +7.26%/yr |
+| no market-stage veto | 5,929 | 11 | 5 | 39.2% | +2.70% | +7.39%/yr |
+| no stage-setup veto | 5,923 | 0 | 0 | 39.2% | +2.70% | +7.26%/yr |
+| **no vetoes at all** | 5,929 | 11 | 5 | 39.2% | +2.70% | +7.39%/yr |
+
+Removing the price-above-MA veto changes the trade set by **zero
+trades**, in both windows. Same for stage-setup. Removing the
+market-stage veto changes 16 entries out of 10,898 on derive and 11 of
+5,923 on test.
+
+The G4 arm settles the mechanism: removing **all three** vetoes gives
+exactly the same trade set as removing the market-stage veto alone — 16
+added and 10 removed on derive, 11 and 5 on test, identical to the
+last decimal on every statistic. The other two vetoes are not merely
+weak, they never bind at all. Only market-stage ever rejects anything
+the scoring ratio would have accepted, and it does so about one time in
+seven hundred.
+
+Two identical arms would normally mean a broken experiment under the
+standing rule, and that was checked first: the patch asserts, and the
+scorer reads the veto list at call time rather than binding it as a
+default. The result is real, and there is a mechanism for it. A stock
+that fails one of these gates almost always fails others — a stock below
+its 30-week average is rarely in a Stage 2 setup — so the 80% scoring
+ratio already rejects it on count. The veto is a second lock on a door
+the first lock had shut.
+
+**What this does and does not say.** It does not say the conditions are
+worthless; they may be doing their work through the ratio. It says their
+*special status* is unearned. Three conditions have been described
+throughout this project as non-negotiable, and on the evidence they
+could be demoted to ordinary voters without changing what the system
+buys. That is one fewer piece of structure to justify, and it removes a
+place where I had assumed rather than measured.
+
+It also explains a nagging observation. These three conditions never
+vary inside the trade set — always True, every trade. I had recorded
+that as a selection artifact of the veto. It is now clear the ratio
+would have produced the same constancy on its own.
+
+---
+
+## Batch 12 — R6 at last, the exit that sells on time. Registered 2026-08-02
+
+R6 was registered in the first batch and never ran, because the code to
+sell on elapsed time did not exist. It does now
+(`simulate_trade(stall_exit_weeks=...)`), and the case for it has grown
+rather than shrunk: every other exit in the engine waits for price to
+reach a level, so a position that simply goes sideways holds capital
+indefinitely — and R20, the best rule measured so far, removes the
+one-year hold cap entirely. R20's own weakness is that it leaves capital
+committed; this is the mechanism that would free it.
+
+### R6a / R6b — stall exit at 13 and 26 weeks `[book]` `[structural]`
+On top of the full R20 configuration. A position still open after 13
+(respectively 26) weeks that has not cleared 0% is sold at that week's
+close. R20 itself runs alongside as a matched control.
+
+Two settings, not a sweep, and declared as two: one quarter and one half
+year, chosen because they are the obvious round intervals and not
+because anything was measured at either. If both fail, R6 fails. If one
+works and the other does not, that asks for a registered sweep rather
+than adopting the winner.
+
+**Expectation:** higher return on *average capital* — the metric that
+penalises idle money — and a *lower* mean per trade, because the
+positions being cut are ones that might have recovered. Those two moving
+in opposite directions is the expected signature, and if mean per trade
+also rises I should be suspicious rather than pleased.
+
+**The trap this could fall into.** Cutting flat positions raises win
+rate arithmetically by removing trades that were going to lose slowly.
+Win rate is therefore not evidence here, and the criteria stay what they
+have been: average-capital return against buy-and-hold, and the
+bootstrap p5 against the baseline mean.
+
+---
+
+## The fixed-capital result, and what it does to R20's pass
+
+Not a registered test. It is a correction to how every result in this
+file has been measured, found by building the account simulation that
+should have existed before any of the criteria were written.
+
+### The problem with both existing denominators
+
+`simulate_account()` takes every signal and reports the answer twice.
+**Peak capital** sizes the account for the single busiest week in a
+decade — R20 needed $589,000 on hand in the test window. **Average
+capital** divides by the money actually working over calendar time,
+which is the optimistic end, because nobody can hold the average and
+still fund the peak.
+
+Criterion (a) throughout this file — beat the index — has been scored on
+average capital. R20 passed it out of sample at +11.99%/yr against SPY's
++11.78%. That pass is now in question, because neither denominator is
+what happens to a real account.
+
+### What a real account does
+
+`simulate_fixed_capital()` starts with a fixed sum, stakes $1,000 per
+signal as signals arrive, and misses the rest when the cash runs out.
+Missing signals is not a modelling choice; it is what finite money
+means. Idle cash earns a yield — 0.5% through the 2010s, 4% since 2022 —
+because charging the strategy nothing on a book that is often half in
+cash, while comparing it to a fully-invested index, is a real cost it
+would not actually bear.
+
+| account | R20 2010-2020 | R20 2021-2026 |
+|---|---|---|
+| $25,000 | +11.27% | +11.46% |
+| $50,000 | +12.62% | +8.53% |
+| $100,000 | +10.35% | +10.17% |
+| $250,000 | +6.92% | +8.72% |
+| **buy and hold SPY** | **+13.61%** | **+11.78%** |
+
+**R20 does not beat buying the index at any account size, in either
+window.** The closest it comes is $50,000 over 2010-2020, a point short,
+and $25,000 over 2021-2026, a third of a point short. It still beats the
+baseline everywhere, so the *relative* findings in this file stand. The
+absolute one does not.
+
+### Why the small accounts look better, and why that is not encouraging
+
+A $25,000 account misses 86% of signals in the test window. Its return
+is therefore decided by which handful of trades it happened to fund, and
+that shows up directly in the seed spread: 8.47 points between the best
+and worst arbitrary tie-break, against 0.26 points at $250,000. The
+small-account figures are not a finding about the strategy. They are
+noise with a plausible mean.
+
+The larger the account, the more of the strategy actually gets run — and
+the more of it gets run, the worse it does. That is the shape of a rule
+whose good trades are scarce relative to how many signals it emits.
+
+### What I got wrong
+
+The criterion was chosen before the tool existed to measure the thing it
+was standing in for, and it flattered the result. R20's out-of-sample
+pass was real against the criterion as written, and the criterion was
+not good enough. I am recording this rather than restating the pass,
+because the pass is what I reported.
+
+Future results should lead with the fixed-capital figure at a stated
+account size, with the seed spread beside it. Average capital stays as a
+secondary number for comparing arms against each other, which is the
+one thing it is genuinely good for.
+
+---
+
+## Batch 13 — which signals get funded? Registered 2026-08-02
+
+The fixed-capital result changes the question. R20 emits about 3,900
+signals in the test window and a $25,000 account can fund 14% of them,
+so the account's return is decided mostly by *which* ones it funds — the
+seed spread is 8.47 points between arbitrary tie-breaks at that size.
+Nothing in this project has ever ranked signals; the engine treats every
+qualifying setup as interchangeable.
+
+If a ranking exists that beats an arbitrary tie-break, it is worth more
+to a real account than any rule change tested so far, because it costs
+nothing to apply and applies to whatever rule is running underneath.
+
+### The one feature available without recomputation
+`conditions_met` is stored per trade. On the derivation window under
+R20 it is monotone across all three of its buckets:
+
+| conditions met | trades | win rate | mean | median |
+|---|---|---|---|---|
+| 4 | 2,165 | 39.9% | +8.96% | -4.51% |
+| 5 | 1,292 | 44.4% | +9.17% | -3.58% |
+| 6 | 121 | 48.8% | +10.01% | -0.48% |
+
+**This is weak evidence and is registered as such.** Three buckets means
+a random ordering comes out monotone about one time in six, the top
+bucket holds 121 trades, and the mean spread is one point. Win rate and
+median separate more convincingly than mean does, which is the pattern
+of a feature that avoids bad trades rather than finds good ones.
+
+### R22 — fund the highest-scoring signals first `[data]`
+When several signals compete for the same money, fund them in
+descending `conditions_met` order instead of arbitrarily. Scored against
+the arbitrary tie-break across the same set of seeds, at $25,000,
+$50,000 and $100,000, on the test and holdout windows.
+
+**Criterion:** the ranked account must beat the *mean* of the arbitrary
+tie-breaks by more than the seed spread of those tie-breaks. Beating the
+average while sitting inside the noise band is not a result.
+
+**Expectation:** a small improvement at small account sizes and
+essentially none at large ones, since a large account funds nearly
+everything and has little left to rank. If the improvement is instead
+largest at the large accounts, something is wrong with the test rather
+than surprising about the market.
+
+**The failure mode I am watching for.** Ranking cannot be tested on the
+window it was derived from, and the table above is derived. The derive
+window is therefore excluded from scoring — it appears here only to
+record why the rule was proposed.
+
+### R22 result — the ranking does not work
+
+Scored on the two windows it was not derived from. Ranked funding
+against the mean of eight arbitrary tie-breaks, with the spread of those
+tie-breaks as the noise band the improvement had to clear.
+
+| account | test 2021-2026 | holdout 2005-2009 |
+|---|---|---|
+| $25,000 | **-1.72 pts** (noise band 14.85) | +0.11 pts (band 7.03) |
+| $50,000 | **-0.96 pts** (band 6.12) | +0.89 pts (band 3.19) |
+| $100,000 | +0.20 pts (band 2.92) | +0.91 pts (band 1.47) |
+
+**R22 fails.** It is negative where it was predicted to help most, and
+every positive figure sits well inside the noise. The derivation-window
+monotonicity across three buckets did not survive, which is roughly what
+a one-in-six chance of spurious monotonicity should be expected to do.
+
+Registering the weakness in advance is what makes this cheap to
+discard. Without the pre-registered noise band, "+0.91 points at
+$100,000, replicated in the holdout" is a perfectly presentable finding
+and it is nothing at all.
+
+**The wider signal-selection problem stands unsolved.** A $25,000
+account still funds one signal in seven, and which seven still swings
+the answer by 14.85 points in the test window. `conditions_met` is
+simply the wrong feature — it is coarse, and it measures agreement among
+conditions that per-condition analysis already showed to be mostly
+inert. A ranking built on features with actual resolution is still worth
+trying, and is not attempted here because those features are not stored
+per trade and would need a re-run to produce.
+
+---
+
+## An observation from the holdout that is not a registered test
+
+R20 over 2005-2009, the window containing the crash, on a $100,000
+account: **+9.64%/yr against SPY's +0.80%/yr.** With idle cash paid
+nothing at all it is +7.99%/yr, so this is not an artifact of interest.
+
+The mechanism is visible in the entry dates:
+
+| year | entries |
+|---|---|
+| 2005 | 338 |
+| 2006 | 304 |
+| 2007 | 229 |
+| 2008 | **63** |
+| 2009 | **570** |
+
+It mostly sat out 2008 and bought the 2009 recovery heavily. That is
+precisely what stage analysis claims to do, and it is the first result
+in this project where the method beats buying the index by a wide
+margin rather than trailing it.
+
+**Why I am not treating this as a finding.** Survivorship bias is
+unfixable in this data — delisted names have instrument records but
+their bars come back INVALID_SYMBOL — and it bites hardest in exactly
+this window. The 2005-2009 universe is the set of companies that still
+existed in 2026, so every firm that went bankrupt in the crash is
+missing. A strategy that buys the 2009 recovery is being scored on a
+universe pre-filtered to companies that recovered. The true figure is
+lower than +9.64% and I have no way to say by how much.
+
+What survives the caveat is the *shape*: entries collapse in the bear
+market and surge in the recovery, without anything in the rule looking
+at a calendar. Survivorship inflates the returns of the trades that were
+taken; it does not explain the timing of when the system chose to trade
+at all.
+
+**One thing this changes.** Every headline in this file compares against
+SPY over windows that were mostly bull markets, and the method has
+consistently trailed. If its advantage is concentrated in falling
+markets, then judging it on 2010-2020 — an almost uninterrupted advance
+— asks it to win where it does not claim to. That is worth testing
+directly rather than inferring, and needs the batch 9 reference arm
+before anything can be concluded.
+
+---
+
+## Batch 14 — does the mined filter select, or does it just thin? Registered 2026-08-02
+
+Batch 8 showed the mined filter's thresholds are on a plateau: moving
+any of the three across a range that changes trade count by 56% moves
+win rate by 0.8 points and leaves the bootstrap ranges almost entirely
+overlapping. That rules out a knife-edge fit, which is the good news.
+
+It also raises a question the whole project has skipped. Every
+comparison of the filter against the baseline has confounded two
+different things:
+
+1. the filter picks *better* setups (selection), and
+2. the filter emits *fewer* signals, so a fixed-capital account is less
+   crowded and funds a larger share of what it sees (thinning).
+
+Thinning improves a capital-constrained account mechanically, with no
+skill involved at all. R19 and R20 both beat the baseline, and neither
+test could tell which effect produced the win.
+
+### R23 — the random-filter control `[structural]`
+Take the baseline arm and discard trades **at random** until its count
+matches the filtered arm's. Score it identically. Repeat over many
+random draws and report the distribution, not one draw.
+
+**Criterion:** the mined filter must beat the random thinning
+distribution's 95th percentile. Beating its median means the filter is
+worth exactly as much as deleting signals with a coin.
+
+**Expectation:** genuinely uncertain, and the flatness in batch 8 is a
+bad sign for the filter. A rule that selects well should get *better*
+per trade as it tightens, and mean per trade did rise slightly with
+tightening (+7.22% → +8.05%) while win rate did not move (41.6% →
+42.1%). Rising mean with a flat win rate and a falling trade count is
+what thinning a fat-tailed distribution looks like, not what selection
+looks like.
+
+**Why this is a fair test and not a rigged one.** Random thinning keeps
+the same entry dates and the same underlying trade population, so the
+crowding relief is identical. The only thing it lacks is the filter's
+claim to know which setups are better. That is precisely the quantity
+in dispute.
+
+### Batch 8 result — a plateau, not a knife edge
+
+Holdout 2005-2009, the window never used to derive anything. Each
+threshold moved one at a time from the centre, everything else held at
+the R20 configuration.
+
+| setting | trades | win | mean | median | $100k account |
+|---|---|---|---|---|---|
+| RS > 15 | 1,898 | 41.6% | +7.22% | -3.52% | +10.20% ± 1.41 |
+| **RS > 20 (centre)** | 1,530 | 42.0% | +7.87% | -3.55% | +9.64% ± 1.47 |
+| RS > 25 | 1,215 | 42.1% | +8.05% | -3.63% | +8.92% ± 1.48 |
+| >5% below high | 1,647 | 41.9% | +7.19% | -3.72% | +9.34% |
+| **>7% (centre)** | 1,530 | 42.0% | +7.87% | -3.55% | +9.63% |
+| >10% below high | 1,369 | 41.4% | +7.71% | -3.92% | +8.03% |
+| base > 30% | 1,694 | 42.1% | +7.52% | -3.77% | +9.61% ± 1.14 |
+| **base > 35% (centre)** | 1,530 | 42.0% | +7.87% | -3.55% | +9.63% |
+| base > 40% | 1,309 | 41.3% | +8.02% | -3.81% | +8.54% ± 1.25 |
+
+**The decisive test passes.** Nothing collapses toward baseline at any
+neighbouring setting, so the rule is not a curve fitted to one lucky
+threshold, and the out-of-sample passes recorded earlier in this file
+were not luck of where the cutoff sat.
+
+**It passes by being insensitive.** Trade count varies by 56% across
+these settings and win rate spans 0.8 points. The bootstrap intervals on
+mean per trade overlap almost entirely: RS>15 gives +1.91% to +13.70%,
+RS>25 gives +2.09% to +15.46%. The numbers I mined — 20, 7%, 35% — were
+neither a lucky pick nor a good one. They are arbitrary points on a flat
+surface, and should be documented as such in
+parameter-calibration.md rather than defended.
+
+Looser settings return more on a real account in both parameters that
+were swept in both directions, which is a consistent sign. It is also
+about 1.2 points against seed spreads of 1.4, so it is recorded as a
+direction worth a registered test and not as a finding.
+
+### Batch 14 result — R23 passes: the filter selects
+
+Forty random draws per window, discarding baseline trades at random down
+to the filtered arm's count, scored identically on a $100,000 account.
+
+| | filtered | random thinning (median / 95th / best of 40) | unfiltered |
+|---|---|---|---|
+| test 2021-2026 | **+10.17%** | +6.96% / +8.04% / +8.25% | +7.26% |
+| derive 2010-2020 | **+10.35%** | +7.32% / +8.20% / +8.85% | +8.95% |
+
+The filtered arm beats **every one of the forty draws** in both windows,
+not merely the registered 95th-percentile bar. The gain is selection,
+not crowding relief.
+
+**What it does and does not attribute.** R20 differs from the baseline
+in three ways at once — the mined filter plus two dropped conditions —
+so this establishes that *R20's selection* carries information, not that
+the mined filter does so on its own. R21 in batch 10 is the arm that
+separates them, and until it lands the credit is unassigned.
+
+**Why this pairs with batch 8 rather than contradicting it.** What the
+filter looks at carries real information; where each cutoff sits does
+not, across the range tested. A genuine effect on a broad plateau is the
+most trustworthy shape available, and the exact opposite of the
+knife-edge fit that batch 8 was built to detect.
+
+---
+
+## Batch 15 — the refinement queue. Registered 2026-08-02
+
+Six changes agreed after the drawdown comparison reframed what this
+strategy appears to be: not an index-beater, but something returning
+about the index with roughly half the fall. Ordered so that each one is
+measurable before the next depends on it.
+
+### M1 — mark-to-market equity `[defect]`
+The account curve values open positions at purchase price, so an open
+loser shows no drawdown until it closes. Every drawdown figure recorded
+in this file is therefore optimistic by an unmeasured amount. This is a
+correction, not an experiment, and it must land first because it is the
+measurement everything defensive is judged on.
+
+### M2 — position sizing by risk `[book]` `[structural]`
+Every trade currently gets the same $1,000 whether the stop sits 4% or
+14% away, so the real bet varies by more than 3x without anyone choosing
+it. Size instead so each trade risks the same fraction of the account:
+shares = (risk budget) / (entry - stop). Stop distance is already
+computed for every trade, so the input exists.
+
+**Expectation:** lower variance, and per-trade mean roughly unchanged.
+If mean per trade moves a lot, sizing is smuggling in a selection effect
+and needs investigating rather than adopting.
+
+### M3 — exposure scaled by volatility and market regime `[data]`
+Hold less when markets are turbulent. Not a signal, a sizing overlay,
+and it stacks on whatever rule is underneath.
+
+### M4 — add to winners `[book]`
+The top 25 trades produce 51% of all profit. With a payoff that
+concentrated, how much is held in the few that work matters more than
+which ones get picked, and a position is currently never increased.
+
+### M5 — exit on relative strength deterioration `[book]`
+Median trade -3.55%, mean +7.87%: most positions bleed slowly and a few
+pay for everything. Every exit today is a price stop. Leaving when a
+stock starts lagging the market targets the bleed directly. The stall
+exit built for R6 is the crude version of this; this is the informed
+one.
+
+### M6 — transaction costs, and the honest version of them `[structural]`
+Webull's published schedule, confirmed 2026-08-02: $0 commission; FINRA
+TAF $0.000195/share on sales capped at $9.79; SEC fee $0.0000206 x
+proceeds on sales; CAT fee $0.000003 x volume on both sides.
+
+On a $1,000 position that is **$0.03 round trip, about 0.003%**. Against
+a mean trade of +7.87% it is not a rounding error, it *is* the rounding.
+
+Modelling it exactly is therefore close to pointless on its own, and it
+will be modelled exactly anyway because it costs nothing to be right.
+The cost that matters is the one Webull does not charge: the bid-ask
+spread and slippage, paid to the market. This universe includes small
+community banks whose spreads are wide.
+
+**So the registered test is a breakeven sweep, not a point estimate.**
+Re-run the best rule charging 0.1%, 0.25%, 0.5%, 1.0% and 2.0% round
+trip and report the cost at which the edge disappears. "How much friction
+can this survive" is answerable; "what exactly is the spread on 1,168
+names over 20 years" is not.
+
+### M7 — a mechanical trend rule against the stage classifier `[data]`
+Time-series momentum is the documented, mechanical form of what stage
+analysis does by eye: hold an asset while its own trend is up. Replace
+the stage classifier with a plain rule — price above its 30-week average
+and 12-month return positive — and run it head to head.
+
+**Expectation:** genuinely uncertain, and that is the point. If a
+two-line rule matches nine hand-tuned conditions, most of this project's
+machinery is decoration. That is worth knowing and would not be a bad
+outcome.
+
+### M8 — momentum as a ranking, not a gate `[data]`
+R22 failed because it ranked on `conditions_met` — three coarse values
+built from conditions already shown to be mostly inert. Mansfield
+relative strength is a momentum measure and the project computes it
+already, then throws away its resolution by using it as pass/fail.
+Cross-sectional momentum is the best-evidenced effect in equities, and
+ranking by it is the version with literature behind it.
+
+Scored against the R22 criterion, unchanged: it must beat the arbitrary
+tie-break by more than the seed spread of those tie-breaks.
+
+---
+
+## Batch 16 — what a month of Sharadar is for. Registered 2026-08-02
+
+Agreed to trial a survivorship-free data vendor. Registering the
+evaluation *before* the data arrives, so the verdict is decided by a
+test rather than by having paid for it.
+
+### The reason, and the reason it is not fundamentals
+The system uses no fundamental inputs at all — the short module has none
+by design and every long condition is price or volume. Point-in-time
+fundamentals matter only for a machine-learning direction not committed
+to. What the vendor fixes *today* is survivorship: it carries delisted
+companies, which Webull cannot serve at all.
+
+### S1 — how much has survivorship been inflating everything `[defect]`
+Re-run R20 over 2005-2009 on a universe including companies that were
+delisted or went bankrupt, against the same run on the survivors-only
+universe already recorded.
+
+That window currently shows +9.63%/yr against SPY's +0.80%, with a
+-10.3% drawdown against SPY's -54.6%, and has been explicitly refused as
+a finding because the universe is the set of companies still listed in
+2026 — a strategy that buys the 2009 recovery being scored on a
+population pre-filtered to things that recovered.
+
+**Expectation:** the gap narrows substantially. If it does not, that is
+the more surprising result and deserves more scrutiny than a
+confirmation would.
+
+**Criterion for the vendor, not the strategy:** this test is worth the
+subscription whichever way it comes out. A large gap tells us every
+figure in this file is inflated and by roughly how much; a small gap
+removes the caveat currently attached to all of them. There is no
+outcome here that leaves us where we started.
+
+### S2 — daily bars beyond the 1200-bar wall `[structural]`
+Webull caps 1200 bars on every timespan, which is 4.75 years of daily
+data and the reason no daily-bar rule has ever been tested over a
+meaningful window. Long daily history removes that block.
+
+Secondary to S1 and explicitly so: it enables new work, whereas S1
+corrects existing work.
+
+### On point-in-time data generally
+Recorded because it was worked out from first principles and is worth
+keeping. Testing on restated fundamentals produces a backtest that
+cannot be reproduced live, since live only ever offers what was known
+then. Two leaks matter and the second is usually larger:
+
+1. **Restatement** — today's database overwrites what was originally
+   filed.
+2. **Reporting lag** — a quarter ending 31 December is not filed until
+   late February. Stamping those figures on 31 December trades on
+   information six weeks before it existed. The numbers are correct;
+   they were simply not available. Point-in-time data carries the filing
+   date, which is what allows the delay to be enforced.
+
+Index membership has the same property: "the S&P 500 in 2008" means its
+constituents then, not now. That is the survivorship problem again in
+another form.
+
+The price side of this project already honours the equivalent
+discipline — the backtest walks forward and reads only bars up to each
+checkpoint. Fundamentals are the same rule applied to a source where the
+discipline has to be bought rather than coded.
