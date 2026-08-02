@@ -611,3 +611,105 @@ class ContinuationEntryTest(unittest.TestCase):
         C.CONTINUATION_ENTRY_MAX_PCT_ABOVE_MA = 15.0
         result = C.evaluate_conditions("T", runaway, runaway, None)
         self.assertFalse(result["continuation_entry"])
+
+
+class VolumeBuildupTest(unittest.TestCase):
+    """The book gives two acceptable volume patterns and this code only
+    tested one: a one-week spike of at least twice the past month.
+
+    The second is a build-up over three to four weeks running at twice
+    the prior average, coupled with only *some* increase on the breakout
+    week itself. A stock accumulating volume through its base and then
+    breaking out on a modest bump satisfies the book and failed here.
+    """
+
+    def setUp(self):
+        self._prev = (C.VOLUME_BUILDUP_WEEKS, C.VOLUME_CONFIRM_RATIO)
+
+    def tearDown(self):
+        C.VOLUME_BUILDUP_WEEKS, C.VOLUME_CONFIRM_RATIO = self._prev
+
+    def test_defaults_to_off(self):
+        self.assertIsNone(self._prev[0])
+
+    def test_the_buildup_ratio_compares_two_adjacent_stretches(self):
+        # 8 quiet weeks, then 4 heavy ones, then the breakout at index 12.
+        volumes = [100.0] * 8 + [300.0] * 4 + [150.0]
+        ratio = C._volume_buildup_ratio(volumes, breakout_idx=12, weeks=4)
+        self.assertAlmostEqual(ratio, 3.0)
+
+    def test_it_returns_none_without_enough_history(self):
+        self.assertIsNone(C._volume_buildup_ratio([100.0] * 5, breakout_idx=3, weeks=4))
+        self.assertIsNone(C._volume_buildup_ratio([100.0] * 20, breakout_idx=None, weeks=4))
+
+    def test_a_buildup_breakout_passes_only_when_enabled(self):
+        """Quiet base, heavy accumulation, then a breakout that merely
+        holds the elevated level — fails the spike test, satisfies the
+        build-up one.
+
+        My first fixture put the breakout week *below* the build-up,
+        which is volume drying up exactly when it should confirm. The
+        book rejects that, and so does this code — the fixture was wrong,
+        not the rule.
+        """
+        volumes = [100.0] * 8 + [300.0] * 4 + [330.0]
+        C.VOLUME_BUILDUP_WEEKS = None
+        off, ratio_off, phase_off = C._evaluate_volume_confirmation(
+            volumes, breakout_idx=12, latest_idx=12, pullback_quality=None)
+        C.VOLUME_BUILDUP_WEEKS = 4
+        on, _, phase_on = C._evaluate_volume_confirmation(
+            volumes, breakout_idx=12, latest_idx=12, pullback_quality=None)
+        self.assertFalse(off, "a mild breakout week must fail the spike test")
+        self.assertTrue(on, "the build-up route should admit it")
+        self.assertEqual(phase_on, "breakout_buildup")
+
+    def test_a_spike_still_passes_without_any_buildup(self):
+        volumes = [100.0] * 12 + [250.0]
+        C.VOLUME_BUILDUP_WEEKS = 4
+        result, _, phase = C._evaluate_volume_confirmation(
+            volumes, breakout_idx=12, latest_idx=12, pullback_quality=None)
+        self.assertTrue(result)
+        self.assertEqual(phase, "breakout", "a plain spike is still pattern A")
+
+    def test_a_breakout_on_falling_volume_still_fails_both(self):
+        """The book is explicit: no significant increase, avoid the stock.
+        The build-up route must not become a way in for dead volume."""
+        volumes = [100.0] * 12 + [40.0]
+        C.VOLUME_BUILDUP_WEEKS = 4
+        result, _, _ = C._evaluate_volume_confirmation(
+            volumes, breakout_idx=12, latest_idx=12, pullback_quality=None)
+        self.assertFalse(result)
+
+
+class VolumeBuildupBoundaryTest(unittest.TestCase):
+    """Both halves of the build-up rule have to bind.
+
+    Correcting the fixture above so the breakout week held its elevated
+    level removed the only case where either half mattered, and two
+    mutations started surviving. These are the failing cases.
+    """
+
+    def setUp(self):
+        self._prev = C.VOLUME_BUILDUP_WEEKS
+        C.VOLUME_BUILDUP_WEEKS = 4
+
+    def tearDown(self):
+        C.VOLUME_BUILDUP_WEEKS = self._prev
+
+    def _check(self, volumes):
+        return C._evaluate_volume_confirmation(
+            volumes, breakout_idx=12, latest_idx=12, pullback_quality=None)[0]
+
+    def test_a_buildup_followed_by_collapsing_volume_fails(self):
+        """Heavy accumulation and then the breakout week comes in far
+        below it — volume drying up exactly when it should confirm. The
+        build-up route must not wave that through."""
+        self.assertFalse(self._check([100.0] * 8 + [300.0] * 4 + [120.0]))
+
+    def test_a_weak_buildup_fails_even_with_a_healthy_breakout_week(self):
+        """Volume only 1.2x the prior stretch is not a build-up. Without
+        this the ratio threshold could be anything."""
+        self.assertFalse(self._check([100.0] * 8 + [120.0] * 4 + [130.0]))
+
+    def test_the_qualifying_case_still_passes(self):
+        self.assertTrue(self._check([100.0] * 8 + [300.0] * 4 + [330.0]))

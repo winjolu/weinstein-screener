@@ -491,3 +491,129 @@ the arm ran as the baseline, reporting byte-identical figures. Recorded
 here rather than silently re-run, because the alternative was reporting
 that the one promising change failed out of sample — a plausible,
 clean, entirely false finding.
+
+---
+
+## Batch 4 — volume, registered 2026-07-29
+
+All four run on top of R14's configuration (weekly checkpoints, no
+maximum hold), because R14 is the current best out-of-sample arm at
++7.07%/yr and the useful question is whether volume improves *that*, not
+whether it improves a configuration already superseded.
+
+**What the book actually says.** It opens by rejecting any "magic level"
+of volume — no randomly picked multiple — and then gives twice the
+average as its working figure. So the current `VOLUME_CONFIRM_RATIO =
+2.0` is sourced rather than invented, like the 15% stop limit was.
+
+What it also gives, and what was never implemented, is a **second
+acceptable pattern**. Either:
+
+  A. a one-week spike of at least twice the past month's average, **or**
+  B. a build-up over three to four weeks at twice the prior average,
+     coupled with at least *some* increase on the breakout week.
+
+Only A existed. A stock accumulating volume through its base and then
+breaking out on a modest bump satisfied the book and failed this code.
+
+### V1 — Lower threshold, 1.5x `[data]`
+`VOLUME_CONFIRM_RATIO = 1.5`. Departs from the book's stated figure.
+
+### V2 — At or above average, 1.0x `[data]`
+`VOLUME_CONFIRM_RATIO = 1.0`. Volume merely not falling.
+
+### V3 — No volume requirement `[data]`
+`VOLUME_CONFIRM_RATIO = 0.0`, so condition 3 never fails at a breakout.
+The book is explicit that a breakout without a significant volume
+increase should be avoided, so this is registered as a control on how
+much work the condition does, not as a candidate.
+
+### V4 — The book's build-up pattern `[book]`
+`VOLUME_BUILDUP_WEEKS = 4`, admitting pattern B alongside pattern A.
+Stronger provenance than V1-V3: it implements something the source
+states and this code omitted, rather than moving a number the source
+supplies.
+
+**Expectation, recorded first:** V4 should admit more trades without
+loosening the standard, since it adds a route the book endorses rather
+than lowering the bar. V1-V3 should degrade progressively if the volume
+condition is carrying real information, and do nothing if it isn't —
+either outcome is informative. Given six wrong predictions tonight I
+hold all of this loosely.
+
+### Criteria
+Unchanged, and compared against R14 rather than R1 since that is the
+base these are built on.
+
+---
+
+## Batch 4 — pattern-mined rule, registered 2026-07-29 before any holdout run
+
+This batch is different in kind from the others and is labelled
+accordingly. Everything above was a hypothesis from the book or from a
+measured defect. This is **mined from the data**, deliberately,
+after I concluded that my original objection —
+an n of 3 winners — no longer applies at 415 winners above +25%.
+
+**What I did.** Extracted 13 features for all 6,151 derivation trades,
+computed only from bars up to the entry date so a rule built on them is
+one the screener could actually have applied. Ranked each feature by
+quintile against realised return, then tested combinations.
+
+**How many things I tried, stated up front:** 13 single features by
+quintile, 8 single-threshold filters, 4 combinations. **25 looks.** At
+that count roughly one in twenty passes at 5% by chance, so an
+unreplicated result here means very little on its own.
+
+### What the mining found
+
+Only two features are monotonic across quintiles, which is the shape a
+real relationship takes rather than a lumpy one:
+
+| feature | Q1 → Q5 mean return | monotonic |
+|---|---|---|
+| Mansfield relative strength | +0.61% → +3.62% | yes |
+| % below the 52-week high | +1.09% → +3.66% | yes |
+| base width | +0.85% → +3.86% | nearly |
+| **volume ratio at entry** | +2.21% → +2.00% | **no, and flat** |
+| **conditions met (the checklist itself)** | +1.33% → +1.18% | **no, and flat** |
+
+Two of those deserve saying plainly. **The checklist score does not
+predict outcome** — trades scoring 7 did no better than trades scoring
+6. And **being further below the 52-week high predicts better returns**,
+which is the opposite of buying strength at new highs.
+
+### R15 — the mined rule `[data]`
+
+Enter only when all three hold at the signal bar:
+
+- Mansfield relative strength **> 20**
+- price **> 7% below** its 52-week high
+- base range **> 35%** wide
+
+Thresholds rounded outward from the fitted quintile edges (20.8, 7.9,
+36.1) deliberately, since exact edges are the most overfitted point
+available.
+
+**Derivation performance:** 319 trades, 46.7% win, **+9.17% a trade**
+against the baseline's +1.84%. A five-fold improvement, which is
+precisely the magnitude that should trigger suspicion rather than
+excitement.
+
+### The holdout
+
+**2005-01-01 to 2009-12-31**, 1,257 mid-cap names with history reaching
+that far. I have never run a query against this period, never read a
+result from it, and it is the only genuinely uncontaminated data in the
+project. It also contains the 2008 crash, so it is a hard test rather
+than a friendly one.
+
+**Success:** the rule's mean return on the holdout exceeds the
+unfiltered baseline's on the same holdout, by a margin surviving a
+bootstrap at the 5th percentile.
+
+**Expectation, recorded now:** I expect this to shrink substantially.
+A five-fold improvement found across 25 looks on one decade is far more
+likely to be a description of 2010-2020 than a property of markets. If
+it holds even at half strength on 2005-2009 including a crash, that is
+a real finding.
