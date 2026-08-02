@@ -829,3 +829,40 @@ separately, before believing any single setting.
 The rule replicated across three windows, which argues real. It was also
 selected from 25 looks, which argues fitted. Sensitivity is what
 separates those two stories.
+
+### Robustness checks on R20 — not registered in advance, and labelled as such
+
+Two diagnostics run after the fact. They test the *result* rather than
+propose a rule, so they can't be p-hacked in the usual way, but they
+were not pre-specified and are recorded here as post-hoc.
+
+**Concentration.** The baseline's entire profit came from 25 trades out
+of 3,804 — the top 25 account for 102% of it, so removing them turns it
+negative. That is why every filter tested earlier destroyed returns:
+each was removing one of a handful of trades carrying everything.
+
+| share of total profit | baseline | R20 |
+|---|---|---|
+| top 3 trades | 36% | 13% |
+| top 10 | 63% | 29% |
+| top 25 | 102% | 51% |
+
+R20 is materially less concentrated. It keeps a fat right tail without
+depending on a few lottery tickets.
+
+**Split-half by name.** Tickers split randomly into two disjoint sets,
+each arm scored separately:
+
+| | half A | half B |
+|---|---|---|
+| baseline | +1.30% | +0.90% |
+| R20 | +4.63% | +4.32% |
+
+Both R20 halves land within 0.3 points on roughly 1,900 trades each. The
+effect reproduces on two independent groups of stocks, which is a fourth
+replication alongside the three time windows.
+
+**What this does not address.** Split-half stability says nothing about
+threshold overfitting — a threshold fitted to a period reproduces across
+both halves of that same period perfectly well. Batch 8 remains the test
+that decides whether the mined filter is real or fitted.
