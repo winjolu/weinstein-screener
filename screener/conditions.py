@@ -1128,6 +1128,29 @@ def _mined_filter_passes(rs, pct_below_52w_high, base_range_pct):
             and base_range_pct > MINED_MIN_BASE_PCT)
 
 
+def _effective_resolved_floor():
+    """The evidence floor, adjusted for deliberately dropped conditions.
+
+    The floor exists to stop a verdict resting on too little evidence,
+    and it was counted against all nine conditions. But dropping a
+    condition shrinks the pool it is measured against, so the two
+    interact badly: with sector strength unavailable (as it is for any
+    window before ~2021) at most eight can resolve, and dropping two
+    more leaves six against a floor of seven. Qualification becomes
+    arithmetically impossible.
+
+    That is exactly what happened — the arms dropping both volume
+    confirmation and risk/reward returned zero trades across all three
+    windows, which reads like "the rule rejects everything" and is
+    actually "the rule cannot be satisfied". Deliberately removing a
+    condition must not make the checklist unreachable.
+
+    Never falls below 4, so dropping conditions can't erode the floor
+    to nothing.
+    """
+    return max(4, MIN_RESOLVED_CONDITIONS - len(DISABLED_CONDITIONS))
+
+
 def _apply_disabled(values):
     """Forces every name in DISABLED_CONDITIONS to None.
 
@@ -1173,11 +1196,11 @@ def score_conditions(conditions, extension_above_ma_pct=None, mined_ok=None):
     elif blocking:
         actionable = False
         reason = "blocked by non-negotiable condition(s): " + ", ".join(blocking)
-    elif resolved < MIN_RESOLVED_CONDITIONS:
+    elif resolved < _effective_resolved_floor():
         actionable = False
         reason = (
             f"only {resolved} of {len(conditions)} conditions resolved — "
-            f"need {MIN_RESOLVED_CONDITIONS} before a verdict means anything"
+            f"need {_effective_resolved_floor()} before a verdict means anything"
         )
     elif met >= required:
         actionable = True
