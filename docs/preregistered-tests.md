@@ -617,3 +617,71 @@ A five-fold improvement found across 25 looks on one decade is far more
 likely to be a description of 2010-2020 than a property of markets. If
 it holds even at half strength on 2005-2009 including a crash, that is
 a real finding.
+
+---
+
+## Batch 5 — registered 2026-07-29, built from what measures rather than what's written
+
+My framing changed here and the batch reflects it: I am not
+committed to the book, so deviations that survive the data are to be
+followed and flagged rather than argued down.
+
+Two measurements drive this batch, both from testing each condition
+separately against realised return over 6,151 derivation trades:
+
+| condition | passes | fails | edge |
+|---|---|---|---|
+| resistance_breakout | +1.75% | −0.80% | **+2.56** |
+| pullback_quality | +1.85% | +1.55% | +0.30 |
+| **volume_confirmation** | +1.84% | +1.84% | **+0.01** |
+| **risk_reward** | +1.50% | +2.26% | **−0.76** |
+
+**Volume confirmation carries no information** — identical to two
+decimals whether it passes or fails. Not a threshold that needs
+adjusting; a condition that measures nothing. That is a flat
+contradiction of the book, which calls the volume signal vital.
+
+**Risk/reward is inverted.** Trades that fail it return more. The 15%
+stop ceiling — the book's own explicit purchase rule — selects against
+winners, now on a fourth independent measurement.
+
+The other five never vary inside the trade set, three because they are
+hard gates a trade cannot exist without. That is a selection artifact,
+not evidence they work, and testing them needs removal rather than
+scoring. **Recorded as a real gap: we have never tested whether
+requiring price above the 30-week average helps.**
+
+### R16 — drop volume confirmation `[data]`
+`DISABLED_CONDITIONS = ("volume_confirmation",)`
+
+### R17 — drop the risk/reward ceiling `[data]`
+`DISABLED_CONDITIONS = ("risk_reward",)`
+
+### R18 — drop both `[data]`
+
+### R19 — the mined filter alone `[data]`
+`MINED_ENTRY_FILTER = True`. Relative strength > 20, price > 7% below
+its 52-week high, base > 35% wide. Already replicated across three
+windows; run here as a gate inside the live engine rather than as
+post-hoc filtering, which is a different and stricter test — the filter
+now changes which trades are *taken*, so it also changes what later
+checkpoints are free to enter.
+
+### R20 — everything that has measured positive `[data]` `[defect]`
+Mined filter, both dead conditions dropped, weekly checkpoints, and no
+one-year hold cap. Every component independently improved results;
+this asks whether they compound or interfere.
+
+Registered as a fixed combination before any of it runs, not assembled
+afterwards from whichever parts looked best.
+
+### Criteria
+Unchanged. Criterion (a) — beat the index on average capital — plus the
+corrected (b) against the baseline's mean. Reported on **all three
+windows**, with 2005-2009 carrying the most weight since it is the only
+period never used to derive anything.
+
+**Expectation:** R19 and R20 improve per-trade return substantially, on
+the strength of the replication already seen. Whether they beat the
+index on *peak* capital is the open question — the mined filter is
+highly selective, and selectivity leaves capital idle.

@@ -713,3 +713,183 @@ class VolumeBuildupBoundaryTest(unittest.TestCase):
 
     def test_the_qualifying_case_still_passes(self):
         self.assertTrue(self._check([100.0] * 8 + [300.0] * 4 + [330.0]))
+
+
+class MinedFilterTest(unittest.TestCase):
+    """The mined entry filter, as a gate.
+
+    Two of its three parts contradict the book — it buys below the
+    52-week high where the book buys breakouts into strength, and it
+    prefers wide bases where the book prefers tight ones. It is also the
+    only rule in the project that replicated out of sample, so it is
+    tested as carefully as the book-derived ones.
+    """
+
+    def setUp(self):
+        self._prev = C.MINED_ENTRY_FILTER
+
+    def tearDown(self):
+        C.MINED_ENTRY_FILTER = self._prev
+
+    def _all_true(self):
+        return {name: True for name in C.CONDITION_NAMES}
+
+    def test_defaults_to_off(self):
+        self.assertFalse(self._prev)
+
+    def test_a_perfect_scorecard_is_blocked_when_the_filter_fails(self):
+        s = C.score_conditions(self._all_true(), None, mined_ok=False)
+        self.assertFalse(s["actionable"])
+        self.assertIn("mined entry filter", s["reason"])
+
+    def test_it_does_not_block_when_satisfied(self):
+        self.assertTrue(C.score_conditions(self._all_true(), None, mined_ok=True)["actionable"])
+
+    def test_unmeasurable_does_not_block(self):
+        """None means the filter couldn't be evaluated, which is a
+        different thing from failing it."""
+        self.assertTrue(C.score_conditions(self._all_true(), None, mined_ok=None)["actionable"])
+
+    def test_it_outranks_the_scoring_ratio(self):
+        s = C.score_conditions(self._all_true(), None, mined_ok=False)
+        self.assertEqual(s["met"], len(C.CONDITION_NAMES))
+        self.assertFalse(s["actionable"])
+
+
+class DisabledConditionsTest(unittest.TestCase):
+    """Dropping a condition from scoring.
+
+    volume_confirmation measured +1.84% whether it passed or failed, over
+    6,151 trades — identical to two decimals, so it carries no
+    information. risk_reward measured backwards, +1.50% passing against
+    +2.26% failing. Both are candidates for removal rather than retuning.
+    """
+
+    def setUp(self):
+        self._prev = C.DISABLED_CONDITIONS
+
+    def tearDown(self):
+        C.DISABLED_CONDITIONS = self._prev
+
+    def _bars(self, n=140):
+        closes, price = [], 100.0
+        for _ in range(n):
+            closes.append(price)
+            price *= 1.01
+        return [bar(d, c * 1.02, c * 0.98, c)
+                for d, c in zip(weekly_dates(len(closes)), closes)]
+
+    def test_defaults_to_dropping_nothing(self):
+        self.assertEqual(self._prev, ())
+
+    def test_a_disabled_condition_resolves_to_none(self):
+        bars = self._bars()
+        C.DISABLED_CONDITIONS = ()
+        before = C.evaluate_conditions("T", bars, bars, None)["conditions"]
+        C.DISABLED_CONDITIONS = ("volume_confirmation",)
+        after = C.evaluate_conditions("T", bars, bars, None)["conditions"]
+        self.assertIsNone(after["volume_confirmation"])
+        # Everything else untouched.
+        for k in before:
+            if k != "volume_confirmation":
+                self.assertEqual(before[k], after[k], f"{k} changed unexpectedly")
+
+    def test_dropping_reduces_the_resolved_count(self):
+        """Picks a condition that actually resolves on this fixture.
+
+        Naming volume_confirmation directly passed for the wrong reason:
+        it was already None on a steadily rising series, so dropping it
+        changed nothing and the assertion compared 4 against 4.
+        """
+        bars = self._bars()
+        C.DISABLED_CONDITIONS = ()
+        before = C.evaluate_conditions("T", bars, bars, None)
+        droppable = [n for n in ("volume_confirmation", "risk_reward",
+                                 "pullback_quality", "resistance_breakout",
+                                 "rs_improving")
+                     if before["conditions"].get(n) is not None]
+        self.assertTrue(droppable, "fixture resolves nothing droppable")
+        C.DISABLED_CONDITIONS = (droppable[0],)
+        after = C.evaluate_conditions("T", bars, bars, None)
+        self.assertLess(after["scoring"]["resolved"],
+                        before["scoring"]["resolved"],
+                        f"dropping {droppable[0]} must shrink the denominator")
+
+    def test_dropping_an_unknown_name_is_harmless(self):
+        bars = self._bars()
+        C.DISABLED_CONDITIONS = ("not_a_real_condition",)
+        self.assertIn("scoring", C.evaluate_conditions("T", bars, bars, None))
+
+
+class MinedFilterPredicateTest(unittest.TestCase):
+    """Each of the mined filter's three tests, with explicit inputs.
+
+    Exercised directly rather than through a synthetic price series:
+    building bars that happen to resolve relative strength, distance
+    below the 52-week high and base width simultaneously is
+    fixture-fighting, and mutations of the individual comparisons
+    survived when I tried it that way.
+    """
+
+    def test_all_three_satisfied_passes(self):
+        self.assertTrue(C._mined_filter_passes(25.0, 10.0, 40.0))
+
+    def test_weak_relative_strength_fails(self):
+        self.assertFalse(C._mined_filter_passes(19.0, 10.0, 40.0))
+
+    def test_too_close_to_the_52_week_high_fails(self):
+        """The part that contradicts the book — it buys breakouts into
+        strength, this refuses anything within 7% of the high."""
+        self.assertFalse(C._mined_filter_passes(25.0, 6.0, 40.0))
+
+    def test_too_tight_a_base_fails(self):
+        """Also contrary to the book, and to BASE_MAX_RANGE_PCT, both of
+        which prefer tight consolidations."""
+        self.assertFalse(C._mined_filter_passes(25.0, 10.0, 30.0))
+
+    def test_each_boundary_is_exclusive(self):
+        self.assertFalse(C._mined_filter_passes(20.0, 10.0, 40.0))
+        self.assertFalse(C._mined_filter_passes(25.0, 7.0, 40.0))
+        self.assertFalse(C._mined_filter_passes(25.0, 10.0, 35.0))
+
+    def test_a_missing_input_fails_rather_than_passing(self):
+        """Unmeasurable is not the same as satisfied."""
+        for args in ((None, 10.0, 40.0), (25.0, None, 40.0), (25.0, 10.0, None)):
+            self.assertFalse(C._mined_filter_passes(*args))
+
+
+class ApplyDisabledTest(unittest.TestCase):
+    """Dropping conditions, tested directly on the mapping."""
+
+    def setUp(self):
+        self._prev = C.DISABLED_CONDITIONS
+
+    def tearDown(self):
+        C.DISABLED_CONDITIONS = self._prev
+
+    def test_nothing_disabled_is_the_identity(self):
+        C.DISABLED_CONDITIONS = ()
+        vals = {"volume_confirmation": True, "risk_reward": False}
+        self.assertEqual(C._apply_disabled(vals), vals)
+
+    def test_a_disabled_condition_becomes_none_even_when_it_resolved(self):
+        """The case that matters: it was True, and must become None. A
+        fixture where it was already None tests nothing."""
+        C.DISABLED_CONDITIONS = ("volume_confirmation",)
+        out = C._apply_disabled({"volume_confirmation": True, "risk_reward": False})
+        self.assertIsNone(out["volume_confirmation"])
+        self.assertIs(out["risk_reward"], False)
+
+    def test_several_can_be_dropped_at_once(self):
+        C.DISABLED_CONDITIONS = ("volume_confirmation", "risk_reward")
+        out = C._apply_disabled({"volume_confirmation": True, "risk_reward": True,
+                                 "stage_setup": True})
+        self.assertIsNone(out["volume_confirmation"])
+        self.assertIsNone(out["risk_reward"])
+        self.assertIs(out["stage_setup"], True)
+
+    def test_untouched_keys_keep_their_values(self):
+        C.DISABLED_CONDITIONS = ("risk_reward",)
+        out = C._apply_disabled({n: True for n in C.CONDITION_NAMES})
+        self.assertEqual(sum(1 for v in out.values() if v is True),
+                         len(C.CONDITION_NAMES) - 1)

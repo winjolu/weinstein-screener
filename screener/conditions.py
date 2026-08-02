@@ -106,6 +106,47 @@ MAX_EXTENSION_ABOVE_MA_PCT = None
 # None disables it, which is current behaviour.
 CONTINUATION_ENTRY_MAX_PCT_ABOVE_MA = None
 
+# Conditions to drop from scoring entirely, by name. A dropped condition
+# resolves to None, which the ratio already excludes, so it stops
+# influencing the verdict without changing the arithmetic elsewhere.
+#
+# This exists because measuring each condition separately against outcome
+# produced two results the checklist can't survive unexamined:
+#
+#   volume_confirmation  +1.84% when it passes, +1.84% when it fails.
+#                        Not weak — identical to two decimals across 6,151
+#                        trades. The condition carries no information.
+#
+#   risk_reward          +1.50% when it passes, +2.26% when it fails.
+#                        Backwards. The 15% stop ceiling is selecting
+#                        against winners, which is now the fourth
+#                        independent measurement pointing that way.
+#
+# Only resistance_breakout showed real edge (+1.75% against -0.80%).
+# The remaining five never vary within the trade set, because three of
+# them are hard gates that must pass for a trade to exist at all — that
+# is a selection artifact and says nothing about their worth. Testing
+# those needs them removed, not scored.
+DISABLED_CONDITIONS = ()
+
+# The mined entry filter: relative strength above MINED_RS_MIN, price at
+# least MINED_PCT_BELOW_HIGH below its 52-week high, and a base wider
+# than MINED_MIN_BASE_PCT. None disables it.
+#
+# Found by ranking 13 entry features against realised return over 6,151
+# derivation trades, not by reading the book — and two of its three parts
+# contradict the book. It buys *below* the 52-week high where the book
+# buys breakouts into strength, and it prefers *wide* bases where the
+# book and this code both prefer tight ones.
+#
+# It is the only rule in the project to replicate out of sample, holding
+# across 2005-2009 (never queried, includes the crash), 2010-2020 and
+# 2021-2026, improving per-trade return roughly fivefold in each.
+MINED_ENTRY_FILTER = False
+MINED_RS_MIN = 20.0
+MINED_PCT_BELOW_HIGH = 7.0
+MINED_MIN_BASE_PCT = 35.0
+
 # Kept for reference: the legacy absolute threshold this replaced.
 ACTIONABLE_THRESHOLD = 8
 
@@ -740,6 +781,7 @@ def _empty_result():
         "breakout_age_weeks": None, "base_is_tight": None, "base_range_pct": None,
         "extension_above_ma_pct": None,
         "continuation_entry": False,
+        "pct_below_52w_high": None,
     }
 
 
@@ -962,7 +1004,7 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         if pullback_quality is None:
             pullback_quality = True
 
-    conditions = {
+    conditions = _apply_disabled({
         "stage_setup": stage_setup,
         "price_above_ma": price_above_ma,
         "volume_confirmation": volume_confirmed,
@@ -972,9 +1014,19 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         "resistance_breakout": resistance_breakout,
         "pullback_quality": pullback_quality,
         "risk_reward": risk_reward,
-    }
+    })
     conditions_met = sum(1 for v in conditions.values() if v is True)
-    scoring = score_conditions(conditions, extension_above_ma_pct)
+    # The mined filter's three inputs, all measurable at the entry bar.
+    pct_below_52w_high = (
+        (week_52_high - closes[latest_idx]) / week_52_high * 100
+        if week_52_high else None
+    )
+    mined_ok = (
+        _mined_filter_passes(mrs_now, pct_below_52w_high, base["base_range_pct"])
+        if MINED_ENTRY_FILTER else None
+    )
+
+    scoring = score_conditions(conditions, extension_above_ma_pct, mined_ok)
 
     conditions_detail = {}
     for name, value in conditions.items():
@@ -1054,10 +1106,40 @@ def evaluate_conditions(ticker, bars, index_bars, sector_data):
         "base_range_pct": base["base_range_pct"],
         "extension_above_ma_pct": extension_above_ma_pct,
         "continuation_entry": continuation_entry,
+        "pct_below_52w_high": pct_below_52w_high,
     }
 
 
-def score_conditions(conditions, extension_above_ma_pct=None):
+def _mined_filter_passes(rs, pct_below_52w_high, base_range_pct):
+    """The mined entry filter's three tests, all measurable at entry.
+
+    Extracted so it can be tested with explicit inputs. Exercising it
+    through evaluate_conditions needs a synthetic series that happens to
+    resolve all three, and building one to order is fixture-fighting —
+    mutations of the individual comparisons survived that way.
+
+    Returns False when any input is missing: an unmeasurable filter is
+    not a passed one.
+    """
+    if rs is None or pct_below_52w_high is None or base_range_pct is None:
+        return False
+    return (rs > MINED_RS_MIN
+            and pct_below_52w_high > MINED_PCT_BELOW_HIGH
+            and base_range_pct > MINED_MIN_BASE_PCT)
+
+
+def _apply_disabled(values):
+    """Forces every name in DISABLED_CONDITIONS to None.
+
+    None is already excluded from the scoring ratio, so a dropped
+    condition stops influencing the verdict without altering the
+    arithmetic around it.
+    """
+    return {name: (None if name in DISABLED_CONDITIONS else value)
+            for name, value in values.items()}
+
+
+def score_conditions(conditions, extension_above_ma_pct=None, mined_ok=None):
     """Turns the 9 raw True/False/None results into a verdict that keeps
     "failed" and "unknown" distinct. See the scoring constants above for
     why. Returns the full picture rather than one number, so output can
@@ -1077,7 +1159,11 @@ def score_conditions(conditions, extension_above_ma_pct=None):
         and extension_above_ma_pct > MAX_EXTENSION_ABOVE_MA_PCT
     )
 
-    if too_extended:
+    if mined_ok is False:
+        actionable = False
+        reason = ("fails the mined entry filter (relative strength, distance "
+                  "below the 52-week high, base width)")
+    elif too_extended:
         actionable = False
         reason = (
             f"price is {extension_above_ma_pct:.0f}% above its 30-week average, "
@@ -1111,6 +1197,7 @@ def score_conditions(conditions, extension_above_ma_pct=None):
         "score": (met / resolved) if resolved else None,
         "extension_above_ma_pct": extension_above_ma_pct,
         "too_extended": too_extended,
+        "mined_ok": mined_ok,
         "blocking": blocking,
     }
 
