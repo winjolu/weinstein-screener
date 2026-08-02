@@ -43,6 +43,15 @@ def _safe_cagr(ending, starting, years):
     return (ending / starting) ** (1 / years) - 1
 
 
+def _percentile(values, fraction):
+    """Simple order-statistic percentile. Sorts a copy, so callers keep
+    whatever ordering they had."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[min(int(len(ordered) * fraction), len(ordered) - 1)]
+
+
 def _resolved(trades):
     """Trades that actually finished. An open trade has no return yet,
     and counting it as zero would quietly dilute everything."""
@@ -87,6 +96,18 @@ def summarise_trades(trades, stake=1000.0):
         "top5_share": (top5 / total_profit * 100) if total_profit > 0 else float("nan"),
         "median_hold_weeks": statistics.median(holds),
         "mean_hold_weeks": statistics.mean(holds),
+        # The spread, not just the middle. Reporting means alone hid the
+        # most important property of the best-performing rule found here:
+        # it doesn't avoid losses, it takes bigger swings both ways. Its
+        # median trade is worse than the baseline's while its mean is four
+        # times better, because the entire edge sits in the right tail.
+        # A reader given only the mean would picture the wrong strategy.
+        "p5_pct": _percentile(returns, 0.05),
+        "p25_pct": _percentile(returns, 0.25),
+        "p75_pct": _percentile(returns, 0.75),
+        "p95_pct": _percentile(returns, 0.95),
+        "share_losing_20pct": sum(1 for r in returns if r < -20) / len(returns) * 100,
+        "share_gaining_50pct": sum(1 for r in returns if r > 50) / len(returns) * 100,
     }
 
 
@@ -346,6 +367,14 @@ def format_report(trades, benchmark=None, stake=1000.0, label=""):
     add(f"  Average winner is {per_trade['payoff']:.2f}x the average loser.")
     add(f"  Best {per_trade['best_pct']:+.1f}%, worst {per_trade['worst_pct']:+.1f}%.")
     add(f"  Typical holding period {per_trade['median_hold_weeks']:.0f} weeks.")
+    add(f"\n  The spread, which the average hides:")
+    add(f"    worst 5%    {per_trade['p5_pct']:>+7.1f}%")
+    add(f"    lower qtr   {per_trade['p25_pct']:>+7.1f}%")
+    add(f"    median      {per_trade['median_pct']:>+7.1f}%")
+    add(f"    upper qtr   {per_trade['p75_pct']:>+7.1f}%")
+    add(f"    best 5%     {per_trade['p95_pct']:>+7.1f}%")
+    add(f"  {per_trade['share_losing_20pct']:.1f}% of trades lost more than 20%; "
+        f"{per_trade['share_gaining_50pct']:.1f}% gained more than 50%.")
 
     add(f"\n-- Putting {money(stake)} into every signal -----------------------------")
     add(f"  {money(per_trade['capital_deployed'])} deployed across {per_trade['n']} trades")

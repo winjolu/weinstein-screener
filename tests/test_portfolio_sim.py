@@ -289,3 +289,43 @@ class WipeoutCagrTest(unittest.TestCase):
         acct = portfolio_sim.simulate_account(
             [_trade("2024-01-05", "2025-01-03", 100.0)], stake=1000.0)
         self.assertAlmostEqual(acct["cagr_pct"], 100.0, delta=1.0)
+
+
+class DistributionReportingTest(unittest.TestCase):
+    """Means alone misrepresent a high-variance strategy.
+
+    The best rule found in this project has a *worse* median trade than
+    the baseline and a mean four times better, because its entire edge
+    sits in the right tail. A reader given only the mean pictures a
+    different strategy from the one that exists.
+    """
+
+    def _skewed(self):
+        # Mostly small losses, occasional large wins — the shape that
+        # makes a mean misleading.
+        return ([_trade("2024-01-05", "2024-06-07", -8.0) for _ in range(70)]
+                + [_trade("2024-01-05", "2024-06-07", 120.0) for _ in range(30)])
+
+    def test_percentiles_are_reported(self):
+        s = portfolio_sim.summarise_trades(self._skewed())
+        for k in ("p5_pct", "p25_pct", "p75_pct", "p95_pct"):
+            self.assertIsNotNone(s[k])
+        self.assertLessEqual(s["p5_pct"], s["p25_pct"])
+        self.assertLessEqual(s["p25_pct"], s["median_pct"])
+        self.assertLessEqual(s["median_pct"], s["p75_pct"])
+        self.assertLessEqual(s["p75_pct"], s["p95_pct"])
+
+    def test_a_negative_median_can_accompany_a_positive_mean(self):
+        s = portfolio_sim.summarise_trades(self._skewed())
+        self.assertLess(s["median_pct"], 0)
+        self.assertGreater(s["mean_pct"], 0)
+
+    def test_tail_shares_are_counted(self):
+        s = portfolio_sim.summarise_trades(self._skewed())
+        self.assertAlmostEqual(s["share_gaining_50pct"], 30.0, delta=0.1)
+        self.assertAlmostEqual(s["share_losing_20pct"], 0.0, delta=0.1)
+
+    def test_the_report_shows_the_spread(self):
+        text = portfolio_sim.format_report(self._skewed())
+        self.assertIn("The spread, which the average hides", text)
+        self.assertIn("best 5%", text)
