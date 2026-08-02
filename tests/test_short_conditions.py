@@ -124,5 +124,6 @@ class ShapeMatchesTheLongSideTest(unittest.TestCase):
     def test_scoring_reports_the_same_fields_as_the_long_side(self):
         short = S.score_short_conditions({n: True for n in S.CONDITION_NAMES})
         long_ = C.score_conditions({n: True for n in C.CONDITION_NAMES})
-        self.assertEqual(set(short) - {"extension_above_ma_pct", "too_extended"},
-                         set(long_) - {"extension_above_ma_pct", "too_extended"})
+        # Long-only scoring fields the short side has no analogue for.
+        long_only = {"extension_above_ma_pct", "too_extended", "mined_ok"}
+        self.assertEqual(set(short) - long_only, set(long_) - long_only)
