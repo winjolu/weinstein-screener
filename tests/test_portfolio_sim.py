@@ -306,14 +306,24 @@ class DistributionReportingTest(unittest.TestCase):
         return ([_trade("2024-01-05", "2024-06-07", -8.0) for _ in range(70)]
                 + [_trade("2024-01-05", "2024-06-07", 120.0) for _ in range(30)])
 
-    def test_percentiles_are_reported(self):
-        s = portfolio_sim.summarise_trades(self._skewed())
-        for k in ("p5_pct", "p25_pct", "p75_pct", "p95_pct"):
-            self.assertIsNotNone(s[k])
-        self.assertLessEqual(s["p5_pct"], s["p25_pct"])
-        self.assertLessEqual(s["p25_pct"], s["median_pct"])
-        self.assertLessEqual(s["median_pct"], s["p75_pct"])
-        self.assertLessEqual(s["p75_pct"], s["p95_pct"])
+    def test_percentiles_land_on_the_right_values(self):
+        """Asserted against a known distribution rather than only checking
+        the ordering. Ordering alone passes when every percentile returns
+        the minimum — a mutation doing exactly that survived."""
+        # 0,1,2,...,99 — so the nth percentile is n.
+        trades = [_trade("2024-01-05", "2024-06-07", float(i)) for i in range(100)]
+        s = portfolio_sim.summarise_trades(trades)
+        self.assertAlmostEqual(s["p5_pct"], 5.0, delta=1.0)
+        self.assertAlmostEqual(s["p25_pct"], 25.0, delta=1.0)
+        self.assertAlmostEqual(s["p75_pct"], 75.0, delta=1.0)
+        self.assertAlmostEqual(s["p95_pct"], 95.0, delta=1.0)
+
+    def test_percentiles_are_strictly_spread_on_a_varied_sample(self):
+        trades = [_trade("2024-01-05", "2024-06-07", float(i)) for i in range(100)]
+        s = portfolio_sim.summarise_trades(trades)
+        self.assertLess(s["p5_pct"], s["p25_pct"])
+        self.assertLess(s["p25_pct"], s["p75_pct"])
+        self.assertLess(s["p75_pct"], s["p95_pct"])
 
     def test_a_negative_median_can_accompany_a_positive_mean(self):
         s = portfolio_sim.summarise_trades(self._skewed())
@@ -321,9 +331,15 @@ class DistributionReportingTest(unittest.TestCase):
         self.assertGreater(s["mean_pct"], 0)
 
     def test_tail_shares_are_counted(self):
-        s = portfolio_sim.summarise_trades(self._skewed())
+        """Both tails need trades in them. Asserting the losing share is
+        zero on a fixture with no deep losses tests nothing — a mutation
+        hard-coding it to zero survived that."""
+        trades = ([_trade("2024-01-05", "2024-06-07", -35.0) for _ in range(20)]
+                  + [_trade("2024-01-05", "2024-06-07", -5.0) for _ in range(50)]
+                  + [_trade("2024-01-05", "2024-06-07", 120.0) for _ in range(30)])
+        s = portfolio_sim.summarise_trades(trades)
+        self.assertAlmostEqual(s["share_losing_20pct"], 20.0, delta=0.1)
         self.assertAlmostEqual(s["share_gaining_50pct"], 30.0, delta=0.1)
-        self.assertAlmostEqual(s["share_losing_20pct"], 0.0, delta=0.1)
 
     def test_the_report_shows_the_spread(self):
         text = portfolio_sim.format_report(self._skewed())
