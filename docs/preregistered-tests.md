@@ -726,3 +726,52 @@ arithmetic, because it is the shape the whole method claims to have.
 
 G1 I genuinely don't know. Every other "obvious" gate tested tonight has
 either done nothing or hurt.
+
+### Batch 5 results — two windows in, one still running
+
+**Holdout 2005-2009 (SPY +0.80%/yr, never used to derive anything)**
+
+| arm | n | win | mean | peak/yr | avg/yr |
+|---|---|---|---|---|---|
+| baseline | 1,753 | 38.8% | +1.59% | +1.53% | +4.70% |
+| R16 drop volume | 598 | 38.5% | +1.23% | +1.02% | +3.66% |
+| R17 drop risk/reward | 1,483 | 43.8% | +3.56% | +3.65% | +8.76% |
+| R18 drop both | 5,711 | 39.7% | +2.01% | +2.75% | +5.88% |
+| R19 mined filter | 151 | 45.7% | +6.42% | +3.68% | +14.48% |
+| **R20 all combined** | 1,530 | 42.0% | **+7.87%** | **+4.57%** | **+15.69%** |
+
+**Derivation 2010-2020 (SPY +13.61%/yr)**
+
+| arm | n | win | mean | peak/yr | avg/yr | vs index |
+|---|---|---|---|---|---|---|
+| baseline | 6,151 | 40.1% | +1.84% | +1.95% | +4.57% | −9.0 |
+| weekly + no cap | 10,898 | 44.2% | +4.55% | +4.15% | +7.72% | −5.9 |
+| R17 drop risk/reward | 4,902 | 42.1% | +1.85% | +1.75% | +4.41% | −9.2 |
+| R19 mined filter | 542 | 44.3% | +6.18% | +3.15% | +10.73% | −2.9 |
+| **R20 all combined** | 3,578 | 41.8% | **+9.07%** | **+4.99%** | **+12.95%** | **−0.7** |
+
+### What these show
+
+**The components compound rather than interfere.** R20 beats R19 on
+per-trade return in both windows while taking six to ten times as many
+trades. Selectivity was the mined filter's weakness — 151 trades over
+five years leaves capital idle — and pairing it with weekly checkpoints
+fixes that without diluting the edge.
+
+**The risk/reward ceiling is harmful specifically in falling markets.**
+Dropping it improves 2005-2009 from +1.59% to +3.56% a trade and does
+nothing at all in 2010-2020 (+1.84% to +1.85%). That is the shape a
+component's value is supposed to have — visible only in the window that
+contains a crash — appearing for a rule the book states as protective.
+It is not neutral; it hurts precisely when it is meant to help.
+
+**Volume removal alone is worse than baseline** (+1.23% against +1.59%)
+while removing both is better (+2.01%). So the gain comes from the
+risk/reward ceiling, not from volume — consistent with volume measuring
+no edge in either direction.
+
+**Still short of the index in a bull window.** R20 closes the gap from
+−9.0 to −0.7 points in 2010-2020, which is near parity rather than a
+pass. Criterion (a) has not been met in any window where the index
+compounded normally. The 2005-2009 result flatters every arm because
+the index returned +0.80% there.
