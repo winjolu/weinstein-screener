@@ -363,3 +363,187 @@ class PayoffGuardTest(unittest.TestCase):
         trades = ([_trade("2024-01-05", "2024-06-07", -10.0) for _ in range(2)]
                   + [_trade("2024-01-05", "2024-06-07", 20.0) for _ in range(2)])
         self.assertAlmostEqual(portfolio_sim.summarise_trades(trades)["payoff"], 2.0)
+
+
+class FixedCapitalTest(unittest.TestCase):
+    """The account that runs out of money. simulate_account() reports
+    against peak capital (harsh, sizes for the worst week of a decade)
+    and average capital (unachievable). Neither is what happens to a
+    real account, and the gap between them has been the largest
+    unresolved ambiguity in every result recorded so far.
+    """
+
+    def test_ample_capital_takes_every_signal(self):
+        trades = [_trade("2020-01-01", "2020-06-01", 10.0, "AAA"),
+                  _trade("2020-02-01", "2020-07-01", 20.0, "BBB")]
+        acct = portfolio_sim.simulate_fixed_capital(trades, capital=10000.0, stake=1000.0)
+        self.assertEqual(acct["skipped"], 0)
+        self.assertEqual(acct["taken"], 2)
+        # $10,000 start, two $1,000 stakes returning +10% and +20%.
+        self.assertAlmostEqual(acct["ending_equity"], 10300.0)
+
+    def test_running_out_of_money_skips_signals(self):
+        trades = [_trade("2020-01-01", "2025-01-01", 10.0, "AAA"),
+                  _trade("2020-01-02", "2025-01-01", 10.0, "BBB"),
+                  _trade("2020-01-03", "2025-01-01", 10.0, "CCC")]
+        acct = portfolio_sim.simulate_fixed_capital(trades, capital=2000.0, stake=1000.0)
+        self.assertEqual(acct["taken"], 2)
+        self.assertEqual(acct["skipped"], 1)
+
+    def test_a_skipped_signal_earns_nothing(self):
+        # The skipped trade is the profitable one. If its return leaks
+        # into the total, the account was never really constrained.
+        trades = [_trade("2020-01-01", "2025-01-01", 0.0, "AAA"),
+                  _trade("2020-01-02", "2025-01-01", 500.0, "ZZZ")]
+        acct = portfolio_sim.simulate_fixed_capital(trades, capital=1000.0, stake=1000.0)
+        self.assertEqual(acct["taken"], 1)
+        self.assertAlmostEqual(acct["ending_equity"], 1000.0)
+
+    def test_a_skipped_signal_earns_nothing_when_it_closes_mid_run(self):
+        # The same claim, but with the skipped trade closing *before* a
+        # later entry, so it is drained by the in-loop exit handler
+        # rather than the final one. The two paths are separate code and
+        # the first version of this test only covered the final drain —
+        # letting a skipped position pay out mid-run went unnoticed.
+        trades = [_trade("2020-01-01", "2026-01-01", 0.0, "AAA"),
+                  _trade("2020-01-02", "2020-03-01", 500.0, "ZZZ"),
+                  _trade("2020-06-01", "2020-07-01", 0.0, "MMM")]
+        acct = portfolio_sim.simulate_fixed_capital(trades, capital=1000.0, stake=1000.0)
+        # AAA holds the only stake until 2026, so both later signals are
+        # missed — including the one that would have returned 500%. That
+        # is the whole point of the exercise: a fixed account's return is
+        # decided as much by what it could not afford as by what it held.
+        self.assertEqual(acct["taken"], 1)
+        self.assertEqual(acct["skipped"], 2)
+        self.assertAlmostEqual(acct["ending_equity"], 1000.0)
+
+    def test_cash_freed_by_a_sale_funds_the_next_buy(self):
+        # One position at a time, three signals in sequence. All three
+        # should be funded because each closes before the next opens.
+        trades = [_trade("2020-01-01", "2020-02-01", 10.0, "AAA"),
+                  _trade("2020-03-01", "2020-04-01", 10.0, "BBB"),
+                  _trade("2020-05-01", "2020-06-01", 10.0, "CCC")]
+        acct = portfolio_sim.simulate_fixed_capital(trades, capital=1000.0, stake=1000.0)
+        self.assertEqual(acct["taken"], 3)
+        self.assertEqual(acct["peak_positions"], 1)
+
+    def test_the_tie_break_is_arbitrary_and_the_seed_exposes_it(self):
+        # Two signals the same day, money for one. Which gets funded is
+        # decided by an arbitrary ordering, so the seed must be able to
+        # change the answer — otherwise the sensitivity check that this
+        # parameter exists to support is silently inert.
+        trades = [_trade("2020-01-01", "2025-01-01", 0.0, "AAA"),
+                  _trade("2020-01-01", "2025-01-01", 100.0, "BBB")]
+        outcomes = {portfolio_sim.simulate_fixed_capital(
+            trades, capital=1000.0, stake=1000.0, seed=s)["ending_equity"]
+            for s in range(12)}
+        self.assertGreater(len(outcomes), 1)
+
+    def test_the_run_does_not_mutate_the_caller_s_trades(self):
+        # Funding is tracked on the trade dicts, which are the caller's
+        # objects. Leaving that bookkeeping behind would corrupt any
+        # later run over the same list.
+        trades = [_trade("2020-01-01", "2025-01-01", 10.0, "AAA")]
+        portfolio_sim.simulate_fixed_capital(trades, capital=1000.0, stake=1000.0)
+        self.assertNotIn("_funded", trades[0])
+
+    def test_repeated_runs_agree(self):
+        trades = [_trade("2020-01-01", "2021-01-01", 10.0, "AAA"),
+                  _trade("2020-01-01", "2021-01-01", -5.0, "BBB"),
+                  _trade("2020-06-01", "2021-06-01", 30.0, "CCC")]
+        first = portfolio_sim.simulate_fixed_capital(trades, capital=2000.0)
+        second = portfolio_sim.simulate_fixed_capital(trades, capital=2000.0)
+        self.assertEqual(first["ending_equity"], second["ending_equity"])
+        self.assertEqual(first["taken"], second["taken"])
+
+    def test_idle_cash_earns_the_yield(self):
+        # One $1,000 position for a year out of a $10,000 account at 4%.
+        # $9,000 sits idle and should earn about $360.
+        trades = [_trade("2020-01-01", "2021-01-01", 0.0, "AAA")]
+        acct = portfolio_sim.simulate_fixed_capital(
+            trades, capital=10000.0, stake=1000.0, cash_yield_pct=4.0)
+        self.assertAlmostEqual(acct["interest_earned"], 360.0, delta=5.0)
+
+    def test_cash_yield_is_off_by_default(self):
+        trades = [_trade("2020-01-01", "2021-01-01", 0.0, "AAA")]
+        acct = portfolio_sim.simulate_fixed_capital(trades, capital=10000.0)
+        self.assertEqual(acct["interest_earned"], 0.0)
+        self.assertAlmostEqual(acct["ending_equity"], 10000.0)
+
+    def test_interest_does_not_accrue_on_money_in_a_position(self):
+        # Same account, but fully deployed. Nothing is idle, so nothing
+        # is earned — this fails if the yield is applied to total equity
+        # rather than to the cash balance.
+        trades = [_trade("2020-01-01", "2021-01-01", 0.0, "AAA")]
+        acct = portfolio_sim.simulate_fixed_capital(
+            trades, capital=1000.0, stake=1000.0, cash_yield_pct=4.0)
+        self.assertAlmostEqual(acct["interest_earned"], 0.0, delta=0.01)
+
+    def test_deployment_reports_how_much_money_was_working(self):
+        # $1,000 of a $4,000 account, deployed the whole time: 25%.
+        trades = [_trade("2020-01-01", "2021-01-01", 0.0, "AAA")]
+        acct = portfolio_sim.simulate_fixed_capital(
+            trades, capital=4000.0, stake=1000.0)
+        self.assertAlmostEqual(acct["deployed_vs_start_pct"], 25.0, delta=0.5)
+
+    def test_interest_reaches_the_ending_balance(self):
+        # Reporting the interest but never crediting it leaves every
+        # figure that matters unchanged, which is exactly the kind of
+        # error that reads as correct.
+        trades = [_trade("2020-01-01", "2021-01-01", 0.0, "AAA")]
+        acct = portfolio_sim.simulate_fixed_capital(
+            trades, capital=10000.0, stake=1000.0, cash_yield_pct=4.0)
+        self.assertAlmostEqual(acct["ending_equity"], 10360.0, delta=5.0)
+        self.assertGreater(acct["cagr_pct"], 3.0)
+
+    def test_a_sale_funds_a_purchase_made_the_same_day(self):
+        # Exits must be settled before entries on a shared date. With
+        # the ordering reversed the second signal is missed for want of
+        # money that was already there, and no test with non-overlapping
+        # dates can tell the difference.
+        trades = [_trade("2020-01-01", "2020-06-01", 0.0, "AAA"),
+                  _trade("2020-06-01", "2020-12-01", 0.0, "BBB")]
+        acct = portfolio_sim.simulate_fixed_capital(
+            trades, capital=1000.0, stake=1000.0)
+        self.assertEqual(acct["taken"], 2)
+        self.assertEqual(acct["skipped"], 0)
+
+    def test_priority_decides_which_competing_signal_is_funded(self):
+        # Two signals, one stake. The better-ranked one must win
+        # regardless of the alphabetical fallback, which would otherwise
+        # pick AAA.
+        trades = [_trade("2020-01-01", "2025-01-01", 0.0, "AAA"),
+                  _trade("2020-01-01", "2025-01-01", 100.0, "ZZZ")]
+        trades[0]["conditions_met"] = 4
+        trades[1]["conditions_met"] = 6
+        acct = portfolio_sim.simulate_fixed_capital(
+            trades, capital=1000.0, stake=1000.0,
+            priority=lambda t: t["conditions_met"])
+        self.assertAlmostEqual(acct["ending_equity"], 2000.0)
+
+    def test_priority_survives_the_seed_shuffle(self):
+        # The shuffle exists to randomise arbitrary ties. If it reshuffles
+        # across priority levels it silently cancels the ranking, and the
+        # comparison the ranking was built for measures nothing.
+        trades = [_trade("2020-01-01", "2025-01-01", 0.0, "AAA"),
+                  _trade("2020-01-01", "2025-01-01", 100.0, "ZZZ")]
+        trades[0]["conditions_met"] = 4
+        trades[1]["conditions_met"] = 6
+        equities = {portfolio_sim.simulate_fixed_capital(
+            trades, capital=1000.0, stake=1000.0, seed=s,
+            priority=lambda t: t["conditions_met"])["ending_equity"]
+            for s in range(15)}
+        self.assertEqual(equities, {2000.0})
+
+    def test_the_seed_still_breaks_ties_within_a_priority_level(self):
+        # Equal rank, so the ranking has nothing to say and the seed must
+        # still be able to change the outcome.
+        trades = [_trade("2020-01-01", "2025-01-01", 0.0, "AAA"),
+                  _trade("2020-01-01", "2025-01-01", 100.0, "ZZZ")]
+        trades[0]["conditions_met"] = 5
+        trades[1]["conditions_met"] = 5
+        equities = {portfolio_sim.simulate_fixed_capital(
+            trades, capital=1000.0, stake=1000.0, seed=s,
+            priority=lambda t: t["conditions_met"])["ending_equity"]
+            for s in range(15)}
+        self.assertGreater(len(equities), 1)
