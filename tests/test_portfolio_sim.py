@@ -345,3 +345,21 @@ class DistributionReportingTest(unittest.TestCase):
         text = portfolio_sim.format_report(self._skewed())
         self.assertIn("The spread, which the average hides", text)
         self.assertIn("best 5%", text)
+
+
+class PayoffGuardTest(unittest.TestCase):
+    """A trade returning exactly 0% counts as a loss, so a sample whose
+    only non-winners are flat makes the average loss zero and the payoff
+    ratio divide by zero. Found by a percentile test using returns 0..99,
+    where 0.0 was the sole 'loss'."""
+
+    def test_a_flat_only_loss_set_does_not_raise(self):
+        trades = ([_trade("2024-01-05", "2024-06-07", 0.0)]
+                  + [_trade("2024-01-05", "2024-06-07", 10.0) for _ in range(5)])
+        s = portfolio_sim.summarise_trades(trades)
+        self.assertNotEqual(s["payoff"], s["payoff"])   # NaN
+
+    def test_an_ordinary_payoff_still_computes(self):
+        trades = ([_trade("2024-01-05", "2024-06-07", -10.0) for _ in range(2)]
+                  + [_trade("2024-01-05", "2024-06-07", 20.0) for _ in range(2)])
+        self.assertAlmostEqual(portfolio_sim.summarise_trades(trades)["payoff"], 2.0)
