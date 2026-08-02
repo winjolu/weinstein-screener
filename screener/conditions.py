@@ -168,6 +168,29 @@ MA_SLOPE_THRESHOLD_PCT = 0.5
 MA_CURVATURE_LOOKBACK = None
 
 VOLUME_CONFIRM_RATIO = 2.0
+
+# The book gives TWO acceptable volume patterns and this code only ever
+# tested the first:
+#
+#   A. a one-week spike of at least twice the past month's average, or
+#   B. a build-up over the past three to four weeks running at twice the
+#      prior average, coupled with *some* increase on the breakout week.
+#
+# So a stock quietly accumulating volume for a month and then breaking
+# out on a modest bump satisfies the book and fails this implementation.
+# Set BUILDUP_WEEKS to enable pattern B as an alternative route to
+# passing; None keeps the current single-pattern behaviour.
+#
+# Worth noting the book prefaces both with an explicit rejection of any
+# "magic level" of volume, then immediately uses twice-the-average as its
+# working figure — so 2.0 is sourced rather than invented, and it is the
+# *pattern* that was missing, not the number.
+VOLUME_BUILDUP_WEEKS = None
+VOLUME_BUILDUP_RATIO = 2.0
+# "at least some increase on the breakout week" — deliberately mild,
+# since under pattern B the confirmation has already happened during the
+# build-up rather than on the breakout bar itself.
+VOLUME_BUILDUP_BREAKOUT_MIN = 1.0
 # My own reading of "contraction" for the pullback half of condition 3 —
 # the book doesn't give a number, so below-average (< 1.0x the trailing
 # 4-week average) is my baseline for "volume is drying up," same spirit
@@ -422,6 +445,29 @@ def _evaluate_pullback(closes, volumes, resistance_level, breakout_idx, latest_i
     return bool(holding_above_breakout and volume_contracting)
 
 
+def _volume_buildup_ratio(volumes, breakout_idx, weeks):
+    """Average volume over the `weeks` before the breakout, against the
+    average of the equivalent stretch before that.
+
+    This is the book's second acceptable pattern — sustained heavy
+    trading during the base rather than a single spike on the breakout.
+    """
+    if breakout_idx is None or weeks is None:
+        return None
+    start = breakout_idx - weeks
+    prior_start = start - weeks
+    if prior_start < 0:
+        return None
+    recent = volumes[start:breakout_idx]
+    prior = volumes[prior_start:start]
+    if not recent or not prior:
+        return None
+    prior_avg = sum(prior) / len(prior)
+    if not prior_avg:
+        return None
+    return (sum(recent) / len(recent)) / prior_avg
+
+
 def _evaluate_volume_confirmation(volumes, breakout_idx, latest_idx, pullback_quality):
     """Condition 3: "Volume confirmation on breakout; contraction on
     pullbacks" (docs/methodology.md) — two different, opposite-direction
@@ -446,7 +492,17 @@ def _evaluate_volume_confirmation(volumes, breakout_idx, latest_idx, pullback_qu
     in_pullback = pullback_quality is not None
 
     if at_fresh_breakout:
-        return volume_ratio >= VOLUME_CONFIRM_RATIO, volume_ratio, "breakout"
+        if volume_ratio >= VOLUME_CONFIRM_RATIO:
+            return True, volume_ratio, "breakout"
+        # Pattern B: the build-up route. Volume ran heavy for the weeks
+        # *before* the breakout, and the breakout week itself only needs
+        # some increase rather than a spike.
+        if VOLUME_BUILDUP_WEEKS:
+            built = _volume_buildup_ratio(volumes, breakout_idx, VOLUME_BUILDUP_WEEKS)
+            if (built is not None and built >= VOLUME_BUILDUP_RATIO
+                    and volume_ratio >= VOLUME_BUILDUP_BREAKOUT_MIN):
+                return True, volume_ratio, "breakout_buildup"
+        return False, volume_ratio, "breakout"
     if in_pullback:
         return volume_ratio < VOLUME_CONTRACTION_RATIO, volume_ratio, "pullback"
 
