@@ -939,3 +939,44 @@ class ResolvedFloorAdaptsTest(unittest.TestCase):
         self.assertEqual(s["resolved"], 6)
         self.assertTrue(s["actionable"],
                         "dropping conditions must not make qualification impossible")
+
+
+class MinedHighDirectionTest(unittest.TestCase):
+    """Which side of the 52-week-high threshold counts as a pass.
+
+    I mined the threshold's value from the winners and never checked its
+    sign. Batch 8 swept it and win rate falls as the required discount
+    widens, in two windows of three — so the sign is in question and the
+    engine has to be able to run it both ways.
+    """
+
+    def setUp(self):
+        self._prev = C.MINED_REQUIRE_NEAR_HIGH
+
+    def tearDown(self):
+        C.MINED_REQUIRE_NEAR_HIGH = self._prev
+
+    def test_default_demands_a_discount_to_the_high(self):
+        C.MINED_REQUIRE_NEAR_HIGH = False
+        # 12% below the high clears a 7% requirement; 3% does not.
+        self.assertTrue(C._mined_filter_passes(30.0, 12.0, 50.0))
+        self.assertFalse(C._mined_filter_passes(30.0, 3.0, 50.0))
+
+    def test_inverted_demands_proximity_to_the_high(self):
+        C.MINED_REQUIRE_NEAR_HIGH = True
+        self.assertFalse(C._mined_filter_passes(30.0, 12.0, 50.0))
+        self.assertTrue(C._mined_filter_passes(30.0, 3.0, 50.0))
+
+    def test_the_other_two_tests_still_apply_when_inverted(self):
+        # Inverting one leg must not quietly disable the rest.
+        C.MINED_REQUIRE_NEAR_HIGH = True
+        self.assertFalse(C._mined_filter_passes(5.0, 3.0, 50.0),
+                         "weak relative strength should still fail")
+        self.assertFalse(C._mined_filter_passes(30.0, 3.0, 10.0),
+                         "a narrow base should still fail")
+
+    def test_missing_inputs_fail_in_either_direction(self):
+        for flag in (False, True):
+            C.MINED_REQUIRE_NEAR_HIGH = flag
+            self.assertFalse(C._mined_filter_passes(None, 3.0, 50.0))
+            self.assertFalse(C._mined_filter_passes(30.0, None, 50.0))
