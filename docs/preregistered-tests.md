@@ -2617,3 +2617,48 @@ name trading $2.6M a week is about $500,000 a day; a $10,000 position is
 The edge partly lives in names that cannot absorb size. That constrains
 how large this strategy can ever run, and it is worth knowing before the
 account grows rather than after.
+
+### D3 result — the edge does not survive much survivorship damage
+
+We cannot price companies that no longer exist. We can ask how much
+damage it would take to matter, by injecting phantom total losses at the
+same timing profile as real trades.
+
+| window | R20 | +2% total losses | +5% | +10% |
+|---|---|---|---|---|
+| 2005-2009 | +9.20% | +6.25% | +1.48% | -9.20% |
+| 2010-2020 | +10.45% | +7.96% | +3.28% | -5.05% |
+| 2021-2026 | +11.26% | +6.52% | -2.90% | -16.99% |
+
+**Two percent of trades going to zero erases the advantage over the
+index in two windows of three.** Five percent erases it everywhere.
+
+The fragility is arithmetic rather than surprising: the measured edge is
+about ten points a year on an account that recycles its capital many
+times, so a wipeout costs the full stake where a normal loss costs a
+fraction of it.
+
+**Two caveats, pulling opposite ways.**
+
+Total loss is the harshest assumption available. Our stops would catch a
+company declining over months — a Stage 4 breakdown does not gap
+straight to zero — so only overnight bankruptcy produces -100%. The true
+average for a failed position is somewhere between the stop distance and
+the full stake, which makes 2% of trades at -100% equivalent to a larger
+fraction at a realistic severity.
+
+Against that, the census found 2,805 companies delisted and absent from
+a universe of 1,257 in 2005-2009 alone, and 40% of the missing were not
+merger-related. The rate of undetected failures is not obviously below
+the threshold that matters.
+
+**This is the strongest argument yet for buying survivorship-free
+prices.** Not because the correction is certainly large, but because the
+sensitivity is steep enough that a correction we cannot measure is
+capable of inverting the conclusion. Batch 16's registered criterion —
+is the hole big enough to justify the subscription — now has a number
+attached to it rather than an intuition.
+
+**The neutral case is uninteresting by construction.** If the missing
+names performed like the survivors, nothing changes, which is exactly
+why that assumption cannot be used to reassure anyone.
