@@ -2711,3 +2711,46 @@ be replaced by two lines and one regime filter, and most of this project
 is confirmed as decoration after all. If it does not, the checklist is
 doing something subtler than regime detection and deserves more respect
 than tonight's results give it.
+
+---
+
+## Applying Harvey, Liu & Zhu (2016) — nothing here clears the bar
+
+The paper argues that because hundreds of factors have been tested
+against the same data, the conventional t-statistic cutoff of 2.0 is far
+too low, and a new factor needs **t > 3.0**. It also distinguishes
+sharply between kinds of discovery: "a factor derived from a theory
+should have a lower hurdle than a factor discovered from a purely
+empirical exercise."
+
+This project has run more than twenty-five arms against three windows,
+and its central rule was mined from the winners.
+
+t-statistics on weekly account returns:
+
+| window | R20 (nine conditions) | M7 (two lines) |
+|---|---|---|
+| 2005-2009 | 1.63 | -0.65 |
+| 2010-2020 | 2.31 | **3.17** |
+| 2021-2026 | 1.34 | 1.97 |
+
+**R20 never clears 3.0 and clears 2.0 once.** The only arm clearing 3.0
+anywhere is M7 — the rule taken unchanged from the trend-following
+literature, which by Harvey's own argument is entitled to the *lower*
+hurdle and clears the higher one anyway.
+
+The mined thresholds are the case the paper is most sceptical of, and
+they do not approach either bar.
+
+**Caveat, stated rather than buried.** t-statistics on weekly account
+returns are not formally the same object as factor t-statistics in
+cross-sectional asset pricing, so this is an application by analogy. The
+multiple-testing logic transfers cleanly; the exact critical value may
+not.
+
+**What it changes.** Every pre-registered criterion in this file —
+bootstrap 5th percentile above the baseline's mean, beat the index on
+average capital — was set without any adjustment for the number of looks
+taken. Those criteria are not wrong so much as unadjusted, and the
+adjustment is large. Any future claim from this project should carry a
+t-statistic and the count of arms run to date beside it.
