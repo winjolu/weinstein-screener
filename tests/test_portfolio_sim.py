@@ -745,3 +745,103 @@ class RiskBasedSizingTest(unittest.TestCase):
         portfolio_sim.simulate_fixed_capital(trades, capital=50000.0, risk_pct=1.0)
         self.assertNotIn("_stake", trades[0])
         self.assertNotIn("_funded", trades[0])
+
+
+class RiskAdjustedTest(unittest.TestCase):
+    """Calmar, Sterling, Burke, Sortino, Ulcer and time under water.
+
+    Several rather than one because each fails differently, and this
+    strategy's return distribution breaks the assumptions behind the
+    most-quoted of them.
+    """
+
+    def _curve(self, values, start="2020-01-06"):
+        import datetime
+        day = datetime.date.fromisoformat(start)
+        return [(day + datetime.timedelta(weeks=i), v)
+                for i, v in enumerate(values)]
+
+    def test_a_monotonic_rise_has_no_drawdown_episodes(self):
+        self.assertEqual(portfolio_sim.drawdown_series(
+            self._curve([100.0 + i for i in range(20)])), [])
+
+    def test_a_fall_and_recovery_is_one_episode_with_its_depth(self):
+        curve = self._curve([100.0, 90.0, 80.0, 90.0, 105.0])
+        episodes = portfolio_sim.drawdown_series(curve)
+        self.assertEqual(len(episodes), 1)
+        self.assertAlmostEqual(episodes[0][0], -20.0)
+
+    def test_two_separate_falls_are_two_episodes(self):
+        curve = self._curve([100.0, 90.0, 105.0, 95.0, 110.0])
+        self.assertEqual(len(portfolio_sim.drawdown_series(curve)), 2)
+
+    def test_an_unrecovered_fall_still_counts(self):
+        # Treating a loss that never came back as "not a drawdown yet"
+        # would flatter every arm that ends underwater.
+        curve = self._curve([100.0, 90.0, 80.0, 85.0])
+        episodes = portfolio_sim.drawdown_series(curve)
+        self.assertEqual(len(episodes), 1)
+        self.assertAlmostEqual(episodes[0][0], -20.0)
+
+    def test_time_under_water_is_measured_in_weeks(self):
+        curve = self._curve([100.0, 90.0, 90.0, 90.0, 90.0, 105.0])
+        stats = portfolio_sim.risk_adjusted(curve, 10.0)
+        self.assertAlmostEqual(stats["longest_under_water_weeks"], 5.0, delta=0.5)
+
+    def test_calmar_is_return_over_the_worst_fall(self):
+        curve = self._curve([100.0, 80.0, 100.0])
+        stats = portfolio_sim.risk_adjusted(curve, 10.0)
+        self.assertAlmostEqual(stats["calmar"], 0.5, places=6)
+
+    def test_sterling_survives_a_single_unlucky_episode_better_than_calmar(self):
+        # One deep fall among several shallow ones. Calmar sees only the
+        # deep one; Sterling averages the three largest.
+        curve = self._curve([100.0, 60.0, 100.0, 97.0, 100.0, 98.0, 100.0])
+        stats = portfolio_sim.risk_adjusted(curve, 10.0)
+        self.assertGreater(stats["sterling"], stats["calmar"])
+
+    def test_ulcer_punishes_a_long_shallow_fall_more_than_a_brief_deep_one(self):
+        # The property no drawdown-depth ratio captures: being 15% down
+        # for two years is worse to live through than 25% down for a
+        # month.
+        brief = self._curve([100.0, 75.0] + [100.0] * 20)
+        long_ = self._curve([100.0] + [85.0] * 20 + [100.0])
+        self.assertGreater(portfolio_sim.risk_adjusted(long_, 10.0)["ulcer_index"],
+                           portfolio_sim.risk_adjusted(brief, 10.0)["ulcer_index"])
+
+    def test_sortino_is_unchanged_by_upside_volatility(self):
+        # The defining property, and the reason to prefer it to Sharpe on
+        # a distribution this right-skewed: two curves with identical
+        # downside must score identically however differently they rise.
+        #
+        # My first version of this only checked that the number was
+        # positive, which cannot detect upside leaking into the
+        # denominator — the mutation survived it.
+        mild = self._curve([100.0, 105.0, 94.5, 99.0, 104.0, 93.6])
+        wild = self._curve([100.0, 130.0, 117.0, 152.0, 197.0, 177.3])
+        a = portfolio_sim.risk_adjusted(mild, 10.0)["sortino"]
+        b = portfolio_sim.risk_adjusted(wild, 10.0)["sortino"]
+        # Each fall is -10% in both curves; only the rises differ.
+        self.assertAlmostEqual(a, b, places=6)
+
+    def test_a_curve_that_never_falls_has_no_downside_to_divide_by(self):
+        # Undefined rather than an invented number. With upside counted
+        # in the denominator this would return a finite value, which is
+        # the specific error being guarded against.
+        rising = self._curve([100.0 * (1.01 ** i) for i in range(20)])
+        sortino = portfolio_sim.risk_adjusted(rising, 10.0)["sortino"]
+        self.assertNotEqual(sortino, sortino, "no downside means undefined")
+
+    def test_a_curve_too_short_to_score_returns_nothing_rather_than_guessing(self):
+        self.assertEqual(portfolio_sim.risk_adjusted(self._curve([100.0]), 10.0), {})
+
+    def test_downside_deviation_is_annualised(self):
+        # Sortino compares an annual return against a deviation, so the
+        # deviation has to be annual too. Leaving it per-period inflates
+        # the ratio by roughly the square root of 52 — a sevenfold
+        # flattery that would look like a spectacular result.
+        curve = self._curve([100.0, 90.0, 99.0, 89.1, 98.0])
+        weekly = portfolio_sim.risk_adjusted(curve, 10.0, periods_per_year=52.0)
+        annual = portfolio_sim.risk_adjusted(curve, 10.0, periods_per_year=1.0)
+        self.assertAlmostEqual(annual["sortino"] / weekly["sortino"],
+                               52.0 ** 0.5, places=4)

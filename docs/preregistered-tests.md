@@ -2332,3 +2332,64 @@ Tuning the cap until the answer looks good, on windows I have already
 read, is exactly how the mined thresholds got their credibility problem.
 If this is worth pursuing it needs registering as its own test with the
 cap swept in both directions.
+
+---
+
+## Risk-adjusted measures — and the number nobody had looked at
+
+Not a registered test. The question was which ratio was being used, and
+the answer was none: raw return beside raw drawdown, with one ad-hoc
+return-over-drawdown calculation that was Calmar without the name.
+
+Six measures now, because each fails differently. Calmar divides by the
+single worst fall and so rests on one episode. Sterling averages the
+three largest and Burke takes the root of their squared sum, both of
+which survive one unlucky episode better. Sortino uses downside
+*volatility* rather than drawdown, which matters because these returns
+are violently right-skewed and Sharpe would penalise the upside the
+strategy exists to capture. Ulcer combines depth with duration, and
+Martin is return over ulcer.
+
+Single seed, marked to market, $100,000 account.
+
+| window | | return | maxDD | Calmar | Sterling | Burke | Sortino | Ulcer | Martin | weeks under water |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2005-2009 | R20 | +9.26% | -26.0% | 0.36 | 0.61 | 0.31 | 0.88 | 14.3 | 0.65 | 179 |
+| | baseline | +8.19% | -16.5% | **0.50** | 0.63 | 0.35 | **1.01** | 8.6 | **0.96** | **114** |
+| | SPY | +0.80% | -54.6% | 0.01 | 0.04 | 0.01 | 0.05 | 20.2 | 0.04 | 116 |
+| 2010-2020 | R20 | +10.57% | -24.3% | 0.43 | 0.48 | 0.28 | 0.94 | 12.2 | 0.87 | 182 |
+| | baseline | +8.72% | -21.1% | 0.41 | 0.51 | 0.29 | 1.00 | 8.9 | 0.98 | 96 |
+| | SPY | +13.61% | -31.8% | 0.43 | **0.62** | **0.34** | **1.19** | **5.2** | **2.63** | **45** |
+| 2021-2026 | R20 | +10.96% | -31.4% | 0.35 | 0.40 | 0.23 | 0.67 | 16.9 | 0.65 | 156 |
+| | baseline | +6.09% | -25.7% | 0.24 | 0.29 | 0.16 | 0.52 | 13.9 | 0.44 | 133 |
+| | SPY | +11.78% | -23.9% | **0.49** | **0.72** | **0.39** | **1.12** | **8.0** | **1.48** | **102** |
+
+### Three findings, none of them comfortable
+
+**1. Risk-adjusted, the strategy only wins in the crash.** Through
+2005-2009 it beats the index on every measure by an enormous margin.
+Over both bull windows the index wins on Sortino, Ulcer, Martin and time
+under water, ties on Calmar in one and beats it in the other. The
+earlier framing — index-like returns with a better risk profile — does
+not survive contact with these.
+
+**2. Time under water is the worst number in the project, and it had
+never been measured.** R20 spends **156 to 182 weeks** below a prior
+peak in every window. Three to three and a half years. The index spends
+45 weeks in the 2010s and 102 recently. Depth was the wrong question:
+this strategy is not mainly deeper underwater than the index, it is
+underwater far longer, and no drawdown-depth ratio would have shown
+that.
+
+**3. The baseline beats R20 on risk-adjusted terms in two windows of
+three.** Every improvement recorded in this file was measured in return.
+On Calmar, Sortino, Martin and weeks under water the plain
+nine-condition checklist is the better system in 2005-2009 and roughly
+level in 2010-2020. **The tuning raised returns and degraded the ride**,
+and I would not have noticed because I was never scoring the ride.
+
+### What this changes
+Return alone is no longer an adequate score for any future arm. The
+comparison table should carry Martin and weeks-under-water beside CAGR,
+because those are the two that would have contradicted my conclusions
+earliest and did so the moment they were computed.

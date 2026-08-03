@@ -225,6 +225,96 @@ def simulate_account(trades, stake=1000.0):
     }
 
 
+def drawdown_series(equity_curve):
+    """Every drawdown episode as (depth_pct, weeks_under_water).
+
+    An episode runs from a new peak to the point equity regains it, so a
+    fall that never recovers is still counted with its length to the end
+    of the record — pretending an unrecovered loss is ongoing rather than
+    finished is the honest treatment.
+    """
+    if not equity_curve:
+        return []
+    episodes = []
+    peak = equity_curve[0][1]
+    peak_at = equity_curve[0][0]
+    trough = peak
+    for when, value in equity_curve:
+        if value >= peak:
+            if trough < peak:
+                episodes.append(((trough - peak) / peak * 100,
+                                 (when - peak_at).days / 7.0))
+            peak, peak_at, trough = value, when, value
+        else:
+            trough = min(trough, value)
+    if trough < peak:
+        episodes.append(((trough - peak) / peak * 100,
+                         (equity_curve[-1][0] - peak_at).days / 7.0))
+    return episodes
+
+
+def risk_adjusted(equity_curve, cagr_pct, periods_per_year=52.0):
+    """Risk-adjusted measures from an equity curve.
+
+    Several, deliberately, because each fails differently and this
+    strategy's return distribution breaks the usual assumptions.
+
+    **Calmar** (return over the single worst drawdown) is the one most
+    often quoted and the weakest here: it is estimated from one episode,
+    and with a handful of episodes per window it moves on noise.
+
+    **Sterling** divides by the average of the three largest falls, and
+    **Burke** by the root of their squared sum, so both survive a single
+    unlucky episode better than Calmar does.
+
+    **Sortino** measures downside *volatility* rather than drawdown at
+    all, which matters because returns here are violently right-skewed —
+    the top 5% of trades carry most of the profit — and Sharpe would
+    punish exactly the upside this strategy exists to capture.
+
+    **Ulcer** is depth and duration together, and **Martin** is return
+    over ulcer. Those two answer the question the others dodge: not how
+    far down, but how far down for how long.
+    """
+    if len(equity_curve) < 3:
+        return {}
+
+    values = [v for _, v in equity_curve]
+    returns = [(b - a) / a for a, b in zip(values, values[1:]) if a > 0]
+    episodes = drawdown_series(equity_curve)
+    depths = sorted((abs(d) for d, _ in episodes), reverse=True)
+
+    downside = [r for r in returns if r < 0]
+    downside_dev = (
+        (sum(r * r for r in downside) / len(returns)) ** 0.5 * (periods_per_year ** 0.5) * 100
+        if downside and returns else None)
+
+    # Ulcer index: root mean square of the drawdown at every point, so a
+    # shallow fall that lasts two years scores worse than a deep one that
+    # recovers in a month.
+    peak = values[0]
+    squared = []
+    for value in values:
+        peak = max(peak, value)
+        squared.append(((value - peak) / peak * 100) ** 2 if peak > 0 else 0.0)
+    ulcer = (sum(squared) / len(squared)) ** 0.5
+
+    worst = depths[0] if depths else 0.0
+    top3 = depths[:3]
+
+    return {
+        "calmar": cagr_pct / worst if worst else float("nan"),
+        "sterling": cagr_pct / (sum(top3) / len(top3)) if top3 else float("nan"),
+        "burke": cagr_pct / (sum(d * d for d in top3) ** 0.5) if top3 else float("nan"),
+        "sortino": cagr_pct / downside_dev if downside_dev else float("nan"),
+        "ulcer_index": ulcer,
+        "martin": cagr_pct / ulcer if ulcer else float("nan"),
+        "worst_drawdown_pct": -worst,
+        "longest_under_water_weeks": max((w for _, w in episodes), default=0.0),
+        "episodes": len(episodes),
+    }
+
+
 def _price_index(bars_by_symbol):
     """{ticker: (sorted dates, closes)} for as-of lookups.
 
@@ -521,6 +611,7 @@ def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
 
     return {
         "marked_to_market": marked,
+        "equity_curve": equity_curve,
         "worst_drawdown_pct": worst_drawdown_pct,
         "start": start.isoformat(),
         "end": end.isoformat(),
