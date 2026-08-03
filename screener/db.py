@@ -65,6 +65,75 @@ CREATE TABLE IF NOT EXISTS universe_cache (
     fetched_date TEXT NOT NULL
 );
 
+-- Who actually owns a ticker, and since when. Tickers get recycled: GM
+-- today is the company incorporated in 2009, not the one that went
+-- bankrupt, and CC is Chemours rather than Circuit City. Webull resolves
+-- a symbol to whoever holds it now, so bars predating the current
+-- holder's existence belong to somebody else entirely.
+--
+-- SEC's CIK is the stable identifier a ticker isn't — it is assigned per
+-- filer and never recycled. first_filing_date is the cutoff: cached bars
+-- older than it are a different company and have to be trimmed.
+--
+-- Cached because this needs one request per symbol against EDGAR and
+-- almost never changes.
+CREATE TABLE IF NOT EXISTS security_identity (
+    ticker TEXT PRIMARY KEY,
+    cik INTEGER,
+    company_name TEXT,
+    first_filing_date TEXT,
+    former_names TEXT,
+    delisted_date TEXT,
+    delisting_form TEXT,
+    fetched_date TEXT NOT NULL
+);
+
+-- Mined features for each signal, one row per (ticker, entry_date, run).
+-- Deliberately NOT a rebuildable cache: regenerating these means walking
+-- the whole universe again, and the first version of this data lived in
+-- a scratch file that would have been deleted with the session. Losing
+-- it would have cost hours of compute and, worse, silently removed the
+-- only thing capable of ranking signals by anything finer than a count.
+--
+-- Stored as a JSON blob rather than fixed columns because the feature
+-- set grows every time a new idea gets tested, and a schema migration
+-- per idea is how measuring things stops happening.
+CREATE TABLE IF NOT EXISTS signal_features (
+    ticker TEXT NOT NULL,
+    entry_date TEXT NOT NULL,
+    parameter_set TEXT NOT NULL,
+    features TEXT NOT NULL,
+    return_pct REAL,
+    PRIMARY KEY (ticker, entry_date, parameter_set)
+);
+
+-- Exactly which symbols a given backtest window ran over. Without this a
+-- result cannot be reproduced, only re-approximated — the universe is an
+-- input to every figure recorded and it was living in a temp file.
+CREATE TABLE IF NOT EXISTS universe_snapshot (
+    name TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    created_date TEXT NOT NULL,
+    PRIMARY KEY (name, symbol)
+);
+
+-- Every delisting notice filed with the SEC, from the quarterly form
+-- indexes. Form 25/25-NSE is the removal notice; Form 15 is
+-- deregistration and comes later, so the two are kept apart rather than
+-- collapsed into "gone".
+--
+-- This measures the survivorship hole rather than filling it: EDGAR
+-- knows which companies left and when, and has none of their prices.
+-- Whether the hole is worth paying a vendor to fill is what this
+-- answers, before paying.
+CREATE TABLE IF NOT EXISTS delisting_events (
+    cik INTEGER NOT NULL,
+    company_name TEXT,
+    form TEXT NOT NULL,
+    filed_date TEXT NOT NULL,
+    PRIMARY KEY (cik, form, filed_date)
+);
+
 CREATE TABLE IF NOT EXISTS backtest_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker TEXT NOT NULL,
@@ -112,6 +181,9 @@ _REBUILDABLE_CACHE_COLUMNS = {
     "universe_cache": {"symbol", "name", "exchange_code", "status", "is_fund",
                        "security_type", "fetched_date"},
     "sector_cache": {"ticker", "sector", "fetched_date"},
+    "security_identity": {"ticker", "cik", "company_name", "first_filing_date",
+                          "former_names", "delisted_date", "delisting_form",
+                          "fetched_date"},
 }
 
 
@@ -265,6 +337,10 @@ def get_ticker_history(ticker, weeks_back):
 
 SECTOR_CACHE_TTL_DAYS = 90
 UNIVERSE_CACHE_TTL_DAYS = 7
+# A company's first filing date never changes and its CIK never changes.
+# Only the delisting fields can move, and a security that delists stays
+# delisted, so this is refreshed on a long cycle rather than a short one.
+IDENTITY_CACHE_TTL_DAYS = 180
 
 
 def _is_fresh(fetched_date, ttl_days):
@@ -306,6 +382,208 @@ def cache_sector(ticker, sector):
         conn.commit()
     finally:
         conn.close()
+
+
+def save_delisting_events(rows):
+    """Bulk-write delisting notices. Idempotent on (cik, form, date), so
+    re-running a quarter corrects rather than duplicates."""
+    conn=_connect()
+    try:
+        conn.executemany(
+            """INSERT OR REPLACE INTO delisting_events
+               (cik, company_name, form, filed_date) VALUES (?, ?, ?, ?)""",
+            [(r["cik"], r.get("company_name"), r["form"], r["filed_date"])
+             for r in rows])
+        conn.commit()
+    finally:
+        conn.close()
+    return len(rows)
+
+
+def get_delisting_events(start=None, end=None):
+    """Delisting notices, optionally bounded by filing date."""
+    conn=_connect(); conn.row_factory=sqlite3.Row
+    try:
+        q="SELECT * FROM delisting_events WHERE 1=1"; args=[]
+        if start: q+=" AND filed_date >= ?"; args.append(start)
+        if end:   q+=" AND filed_date <= ?"; args.append(end)
+        return [dict(r) for r in conn.execute(q, args)]
+    finally:
+        conn.close()
+
+
+def save_signal_features(rows, parameter_set):
+    """Persist mined per-signal features.
+
+    `rows` are dicts holding at least ticker and entry_date; everything
+    else is kept as the feature blob. Anything already stored for the
+    same key is replaced, so a re-mine corrects rather than duplicates.
+    """
+    payload = []
+    for row in rows:
+        features = {k: v for k, v in row.items()
+                    if k not in ("ticker", "entry_date", "return_pct")}
+        payload.append((row["ticker"], row["entry_date"], parameter_set,
+                        json.dumps(features), row.get("return_pct")))
+    conn = _connect()
+    try:
+        conn.executemany(
+            """INSERT OR REPLACE INTO signal_features
+               (ticker, entry_date, parameter_set, features, return_pct)
+               VALUES (?, ?, ?, ?, ?)""", payload)
+        conn.commit()
+    finally:
+        conn.close()
+    return len(payload)
+
+
+def get_signal_features(parameter_set=None):
+    """Mined features, flattened back into one dict per signal."""
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        if parameter_set:
+            rows = conn.execute(
+                "SELECT * FROM signal_features WHERE parameter_set = ?",
+                (parameter_set,)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM signal_features").fetchall()
+    finally:
+        conn.close()
+    out = []
+    for row in rows:
+        record = json.loads(row["features"])
+        record.update(ticker=row["ticker"], entry_date=row["entry_date"],
+                      return_pct=row["return_pct"],
+                      parameter_set=row["parameter_set"])
+        out.append(record)
+    return out
+
+
+def save_universe_snapshot(name, symbols):
+    """Record exactly which symbols a named universe contained."""
+    today = datetime.date.today().isoformat()
+    conn = _connect()
+    try:
+        conn.execute("DELETE FROM universe_snapshot WHERE name = ?", (name,))
+        conn.executemany(
+            "INSERT INTO universe_snapshot (name, symbol, created_date) VALUES (?, ?, ?)",
+            [(name, s, today) for s in sorted(set(symbols))])
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_universe_snapshot(name):
+    """The symbols of a named universe, or [] if never recorded."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT symbol FROM universe_snapshot WHERE name = ? ORDER BY symbol",
+            (name,)).fetchall()
+    finally:
+        conn.close()
+    return [r[0] for r in rows]
+
+
+def get_cached_identity(ticker):
+    """Who owns this ticker, from cache, or None when absent or stale.
+
+    Returns a dict rather than the bare CIK because a null CIK is a valid
+    cached answer — plenty of tradable symbols have no SEC filer behind
+    them at all, ETFs and foreign issues among them — and "we looked and
+    there is nobody" has to be distinguishable from "we never looked".
+    """
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT * FROM security_identity WHERE ticker = ?", (ticker,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None or not _is_fresh(row["fetched_date"], IDENTITY_CACHE_TTL_DAYS):
+        return None
+    return _identity_row_to_dict(row)
+
+
+def _identity_row_to_dict(row):
+    return {
+        "ticker": row["ticker"],
+        "cik": row["cik"],
+        "company_name": row["company_name"],
+        "first_filing_date": row["first_filing_date"],
+        "former_names": json.loads(row["former_names"]) if row["former_names"] else [],
+        "delisted_date": row["delisted_date"],
+        "delisting_form": row["delisting_form"],
+    }
+
+
+def cache_identities(identities):
+    """Writes many identities in one transaction.
+
+    Bulk because resolving the universe is thousands of symbols, and a
+    commit per row turned the equivalent universe write into the slowest
+    part of a run.
+    """
+    today = datetime.date.today().isoformat()
+    conn = _connect()
+    try:
+        conn.executemany(
+            """INSERT OR REPLACE INTO security_identity
+               (ticker, cik, company_name, first_filing_date, former_names,
+                delisted_date, delisting_form, fetched_date)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            [(i["ticker"], i.get("cik"), i.get("company_name"),
+              i.get("first_filing_date"),
+              json.dumps(i["former_names"]) if i.get("former_names") else None,
+              i.get("delisted_date"), i.get("delisting_form"), today)
+             for i in identities],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def tickers_needing_identity(tickers):
+    """Which of these still need fetching — absent or gone stale.
+
+    The point of the whole table: resolving 5,809 symbols is 5,809
+    requests against EDGAR, and doing that again on the next run because
+    nobody asked what was already known would be the actual expense.
+    """
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            "SELECT ticker, fetched_date FROM security_identity"
+        ).fetchall()
+    finally:
+        conn.close()
+    fresh = {r["ticker"] for r in rows
+             if _is_fresh(r["fetched_date"], IDENTITY_CACHE_TTL_DAYS)}
+    return [t for t in tickers if t not in fresh]
+
+
+def bars_predating_owner(ticker, bars):
+    """The bars in this series that belong to a previous holder of the
+    ticker, judged against when the current owner first filed.
+
+    This is the whole reason the table exists. Requesting GM with an end
+    date in 2008 returns bars, and they are not General Motors Co, which
+    did not exist until 2009. Splicing those into one series produces
+    something well-formed and wrong.
+
+    Returns [] when identity is unknown rather than guessing — an unknown
+    owner is not evidence of contamination, and dropping real history on
+    a missing lookup would be the worse error.
+    """
+    identity = get_cached_identity(ticker)
+    if not identity or not identity["first_filing_date"]:
+        return []
+    cutoff = identity["first_filing_date"]
+    return [b for b in bars if (b.get("time") or b.get("date", ""))[:10] < cutoff]
 
 
 def get_cached_universe():
