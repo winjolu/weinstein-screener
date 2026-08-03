@@ -2662,3 +2662,52 @@ attached to it rather than an intuition.
 **The neutral case is uninteresting by construction.** If the missing
 names performed like the survivors, nothing changes, which is exactly
 why that assumption cannot be used to reassure anyone.
+
+### M7 result — two lines beat nine conditions, except when it matters most
+
+| window | | trades | mean | return | maxDD | Martin | weeks under |
+|---|---|---|---|---|---|---|---|
+| 2005-2009 | M7 trend rule | 22,345 | +0.52% | **-3.81%** | **-53.9%** | -0.12 | 211 |
+| | R20 nine conditions | 1,530 | +7.87% | **+9.26%** | -26.0% | 0.65 | 179 |
+| | SPY | | | +0.80% | -54.6% | 0.04 | 116 |
+| 2010-2020 | M7 trend rule | 56,496 | +6.57% | **+11.14%** | **-18.1%** | **1.34** | **136** |
+| | R20 nine conditions | 3,578 | +9.07% | +10.57% | -24.3% | 0.87 | 182 |
+| | SPY | | | +13.61% | -31.8% | 2.63 | 45 |
+| 2021-2026 | M7 trend rule | 35,491 | +1.85% | **+19.38%** | -33.1% | **1.19** | 158 |
+| | R20 nine conditions | 3,800 | +4.48% | +10.96% | -31.4% | 0.65 | 156 |
+| | SPY | | | +11.78% | -23.9% | 1.48 | 102 |
+
+**Price above its 30-week average and a positive 12-month return beats
+the nine-condition checklist in both bull windows** — on return, on
+Martin, and over 2010-2020 on drawdown and time under water too. Over
+2021-2026 it returns +19.38% against the index's +11.78%, the only
+configuration built here that has beaten buy-and-hold on raw return.
+
+**And the crash destroys it.** -3.81% a year with a -53.9% drawdown,
+which is the index's own -54.6% almost exactly. The rule has no regime
+filter: it buys whatever is trending up, including on the way into a
+collapse, and stage analysis's whole contribution is refusing to do
+that.
+
+So the machinery is not decoration, but its value is concentrated almost
+entirely in the bear market — which is precisely where batch 9 located
+the edge. In a bull market nine hand-tuned conditions are worse than two
+lines.
+
+**Per-trade quality tells the same story from the other side.** M7's
+mean trade is +0.52%, +6.57% and +1.85% against R20's +7.87%, +9.07% and
++4.48%. The checklist picks better individual trades in every window.
+M7 wins anyway on the account, because it finds ten to fifteen times as
+many and keeps the capital working. Selectivity has been costing more
+than it earned.
+
+### M9 — the trend rule with the one gate that earns its keep `[data]`
+Registered before running. M7 plus the market-stage condition: buy on
+the simple trend rule, but only while the index itself is in an uptrend.
+
+**Expectation:** the crash window is where this must show up. If M9 keeps
+M7's bull-market returns and avoids the -53.9%, the nine conditions can
+be replaced by two lines and one regime filter, and most of this project
+is confirmed as decoration after all. If it does not, the checklist is
+doing something subtler than regime detection and deserves more respect
+than tonight's results give it.
