@@ -155,3 +155,87 @@ class BacktestTradeTest(_TempDB):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SecurityIdentityCacheTest(_TempDB):
+    """Ticker ownership, cached so EDGAR is asked once rather than per run.
+
+    The failure this guards against isn't a crash: a recycled ticker
+    returns a complete, well-formed series stitched together from two
+    unrelated companies.
+    """
+
+    IBM = {"ticker": "IBM", "cik": 51143, "company_name": "INTERNATIONAL BUSINESS MACHINES",
+           "first_filing_date": "1994-01-01", "former_names": [],
+           "delisted_date": None, "delisting_form": None}
+    GM = {"ticker": "GM", "cik": 1467858, "company_name": "General Motors Co",
+          "first_filing_date": "2009-07-16", "former_names": [],
+          "delisted_date": None, "delisting_form": None}
+
+    def test_an_identity_survives_the_round_trip(self):
+        db.cache_identities([self.GM])
+        got = db.get_cached_identity("GM")
+        self.assertEqual(got["cik"], 1467858)
+        self.assertEqual(got["first_filing_date"], "2009-07-16")
+
+    def test_former_names_round_trip_as_a_list(self):
+        # Stored as JSON, so a bare string would come back as characters.
+        db.cache_identities([dict(self.IBM, former_names=["USA WASTE SERVICES INC"])])
+        self.assertEqual(db.get_cached_identity("IBM")["former_names"],
+                         ["USA WASTE SERVICES INC"])
+
+    def test_a_ticker_with_no_filer_is_a_cached_answer_not_a_miss(self):
+        # ETFs and foreign issues have no SEC filer. Recording that costs
+        # one row and saves looking it up again forever; treating it as a
+        # miss would re-fetch every one of them on every run.
+        db.cache_identities([{"ticker": "XYZ", "cik": None, "company_name": None,
+                              "first_filing_date": None, "former_names": [],
+                              "delisted_date": None, "delisting_form": None}])
+        got = db.get_cached_identity("XYZ")
+        self.assertIsNotNone(got)
+        self.assertIsNone(got["cik"])
+        self.assertEqual(db.tickers_needing_identity(["XYZ"]), [])
+
+    def test_only_unresolved_tickers_are_reported_as_needing_work(self):
+        db.cache_identities([self.GM])
+        self.assertEqual(db.tickers_needing_identity(["GM", "AAPL"]), ["AAPL"])
+
+    def test_a_stale_row_is_refetched(self):
+        db.cache_identities([self.GM])
+        conn = db._connect()
+        conn.execute("UPDATE security_identity SET fetched_date = '2000-01-01'")
+        conn.commit()
+        conn.close()
+        self.assertIsNone(db.get_cached_identity("GM"))
+        self.assertEqual(db.tickers_needing_identity(["GM"]), ["GM"])
+
+    def test_bars_before_the_owner_existed_are_flagged(self):
+        # The real case: General Motors Co first filed in 2009, so 2008
+        # bars under GM belong to the company that went bankrupt.
+        db.cache_identities([self.GM])
+        bars = [{"time": "2008-05-30T00:00:00.000+00:00", "close": 17.0},
+                {"time": "2011-05-30T00:00:00.000+00:00", "close": 31.0}]
+        bad = db.bars_predating_owner("GM", bars)
+        self.assertEqual(len(bad), 1)
+        self.assertTrue(bad[0]["time"].startswith("2008"))
+
+    def test_a_clean_series_flags_nothing(self):
+        db.cache_identities([self.IBM])
+        bars = [{"time": "2005-01-03T00:00:00.000+00:00", "close": 90.0}]
+        self.assertEqual(db.bars_predating_owner("IBM", bars), [])
+
+    def test_an_unknown_ticker_flags_nothing_rather_than_everything(self):
+        # Silence about a symbol we never resolved is not evidence its
+        # history is wrong. Discarding real bars on a missing lookup
+        # would be the more damaging error of the two.
+        bars = [{"time": "1995-01-03T00:00:00.000+00:00", "close": 5.0}]
+        self.assertEqual(db.bars_predating_owner("NEVERSEEN", bars), [])
+
+    def test_a_second_write_updates_rather_than_duplicates(self):
+        db.cache_identities([self.GM])
+        db.cache_identities([dict(self.GM, company_name="GENERAL MOTORS CO")])
+        conn = db._connect()
+        n = conn.execute("SELECT COUNT(*) FROM security_identity WHERE ticker='GM'").fetchone()[0]
+        conn.close()
+        self.assertEqual(n, 1)
+        self.assertEqual(db.get_cached_identity("GM")["company_name"], "GENERAL MOTORS CO")
