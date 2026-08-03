@@ -2576,3 +2576,44 @@ another symbol set entirely. A test caught it immediately by creating
 two dicts that were collected between calls. The cache now holds a
 reference to the dict itself, which prevents the address being reused
 while the entry lives.
+
+### The liquidity floor — withdrawn, the data says the opposite
+
+The cost sweep noted that thin names pay 1-2% spreads against large
+caps' 0.1%, and I concluded a liquidity floor belonged in the universe
+filter. I never checked where the edge actually lives before recommending
+it.
+
+R20 trades split by dollar volume in the entry week:
+
+| window | band | median volume | mean | at 1% slippage | top-5 share |
+|---|---|---|---|---|---|
+| 2010-2020 | thinnest 25% | $2.6M/wk | +10.26% | +8.25% | 51% |
+| | middle 50% | $60.3M/wk | +7.43% | +5.42% | 13% |
+| | most liquid 25% | $648.4M/wk | +11.42% | +9.42% | 28% |
+| 2021-2026 | thinnest 25% | $19.1M/wk | **+13.23%** | **+11.22%** | 24% |
+| | middle 50% | $172.2M/wk | +1.96% | -0.05% | 40% |
+| | most liquid 25% | $1,594M/wk | **+0.46%** | -1.54% | **251%** |
+
+**A liquidity floor would remove the best-performing band.** In the test
+window the thinnest quartile returns +13.23% and survives 1% per-side
+slippage at +11.22%, while the most liquid quartile returns +0.46% and
+goes negative under the same cost.
+
+That 251% is worth pausing on: in the most liquid quartile, the top five
+trades account for more than all the profit, so the remaining 945 trades
+collectively lose money. The large-cap end of this universe is not where
+the strategy works.
+
+**Recommendation withdrawn.** I proposed the floor from a cost argument
+without checking the return side, which is the same error as reading a
+win-rate gradient and calling the 52-week-high threshold wrong-signed —
+reasoning from one number about a system whose behaviour lives in
+another.
+
+**What is real, and is a different problem.** Capacity, not spread. A
+name trading $2.6M a week is about $500,000 a day; a $10,000 position is
+2% of daily volume, which is tradeable, and a $200,000 position is not.
+The edge partly lives in names that cannot absorb size. That constrains
+how large this strategy can ever run, and it is worth knowing before the
+account grows rather than after.
