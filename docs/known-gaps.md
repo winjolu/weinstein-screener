@@ -335,3 +335,51 @@ re-litigated:
 - **Automated scheduling.** Weekly bars mean a weekly cadence, which is
   cheap to run by hand and gives me a reason to look at the output rather
   than let it accumulate unread.
+
+## The product this is becoming (stated 2026-08-02)
+
+Recorded here rather than in the changelog because none of it is built.
+
+A portfolio manager, not just a screener. It should hold my current
+positions, suggest what to replace with what, say what share of the
+stake each should take, maintain trailing stops on what I already own,
+set initial stops on anything new, and keep scanning for prospects. I
+check it once a day after the close, verify its suggestions against my
+own charts, and tell it what I actually did.
+
+**That last step is not a formality.** A record of suggested-versus-taken
+is the only forward evidence this project will ever generate, and every
+figure recorded anywhere in these docs is a backtest.
+
+### What it reprioritises
+Two items registered as refinements are now core features:
+
+- **M2, risk-based sizing.** "What share goes into each" *is* the
+  requested output, not an accuracy improvement to a backtest.
+- **M8, ranking by relative strength.** "What to replace with what" is a
+  ranking question. A pass/fail gate cannot answer it — and batch 8
+  showed relative strength carries a monotone gradient in all three
+  windows that a threshold discards.
+
+### What it adds that does not exist
+- **Portfolio state**: holdings, cost basis, live stop levels, and the
+  suggested-versus-taken log.
+- **Stop maintenance on open positions.** Trailing stops are computed
+  inside the backtest and surfaced nowhere. Different code path.
+- **A daily post-close run.** Worth being honest that the strategy is
+  weekly-bar based, so a daily check mostly re-reads a bar still being
+  formed. Useful for catching a stop, not for producing daily signals,
+  and it should not be built to imply otherwise.
+
+### Privacy requirement
+Real holdings never enter the repository. Same pattern already used for
+config/tickers.json and data/screener.db: a committed
+`config/portfolio.example.json`, the real file gitignored.
+
+### Broker-agnostic costs (supersedes M6 as written)
+M6 hard-coded Webull's schedule. Generalise instead: a broker profile
+carrying commission per trade, per share and percentage, regulatory
+pass-throughs, minimums, and short borrow, with Webull shipped as one
+profile among several. The breakeven sweep then answers "does this
+survive at *this* broker" rather than at one specific broker, which is
+the more useful question and no harder to build.
