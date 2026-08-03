@@ -1485,3 +1485,526 @@ The price side of this project already honours the equivalent
 discipline — the backtest walks forward and reads only bars up to each
 checkpoint. Fundamentals are the same rule applied to a source where the
 discipline has to be bought rather than coded.
+
+---
+
+## Batch 17 — what public data can and cannot repair. Registered 2026-08-02
+
+Two discoveries change the data picture, one of them a correction to
+this project's own reference notes.
+
+### Webull serves the full daily history after all
+`docs/webull-api-reference.md` records 1200 bars as "the practical limit
+on how far any backtest can go". That is wrong. The 1200 cap is
+per-request, and the SDK exposes `start_time`/`end_time` parameters the
+code has never used. They fail on the batch endpoint and fail as date
+strings, but on the single-symbol endpoint with **epoch milliseconds**
+they page backwards correctly. SPY returns 486 bars on the page ending
+1995-01-03, reaching 1993-01-29 — the fund's own inception, not a wall.
+
+Full daily history is therefore free, at roughly five calls per symbol
+to cover 2005-now, about ninety minutes unattended for the whole
+universe. No purchase needed for depth.
+
+### But tickers are recycled, and that is a live contamination risk
+Webull maps a symbol to whoever holds it *now*:
+
+| ticker | Webull resolves to | who held it in 2007 |
+|---|---|---|
+| GM | General Motors Co (CIK 1467858, first filed 2009-07-16) | the old GM, later Motors Liquidation |
+| WM | Waste Management | Washington Mutual also traded as WM |
+| CC | Chemours (incorporated 2014) | Circuit City |
+
+Requesting GM with an end date in 2008 returned 304 bars. Whatever those
+are, they are not the company that ticker resolves to today. A naive
+backfill would splice unrelated companies into one series and return
+something that looks perfectly well-formed.
+
+### D1 — the contamination detector `[defect]`
+SEC EDGAR assigns every filer a permanent **CIK**, which is precisely
+the stable identifier a ticker is not. `company_tickers.json` maps
+current tickers to CIKs, and `data.sec.gov/submissions/CIK##########.json`
+gives each company's first filing date and former names.
+
+For every symbol in the cache, compare the earliest cached bar against
+the CIK's first filing. Bars predating the company's existence are a
+different company and must be trimmed, not kept.
+
+**This must run before any daily backfill**, or the cache is poisoned in
+a way that reads as clean data. Free, and within SEC's stated fair-access
+rate.
+
+### D2 — the delisting census `[defect]`
+Delisting is a matter of public record: **Form 25 / 25-NSE** is the
+notification filed when a security is removed, and **Form 15** is
+deregistration. Lehman's CIK 806085 carries 25-NSE filings dated
+2008-10-15 and 2008-10-21.
+
+So the companies that left the market, and when, are knowable for free.
+Counting them against our universe converts "survivorship bias, extent
+unknown" into a measured hole.
+
+**The classification problem, flagged rather than waved through.** Form
+25 is filed for *every* removal — acquisitions and voluntary exchange
+transfers as well as failures. That matters more than it first appears:
+an acquired company usually left at a premium, so its absence makes our
+results look *worse*, while a bankruptcy's absence makes them look
+better. Survivorship bias is normally assumed to inflate, and it is not
+obvious a priori which way the net runs here. A census that does not
+separate the two answers nothing.
+
+### D3 — bounding the damage `[structural]`
+With D2's count, bound the impact rather than pretend to fix it: what
+happens to every headline figure if the missing names are assumed to
+have performed at market, and separately if the failures are assumed
+total losses.
+
+Worth noting that the stop logic caps single-name damage — except in
+precisely the case that matters, since bankruptcies gap overnight
+through any stop.
+
+### What none of this fixes
+EDGAR holds filings, not prices. Knowing Lehman delisted on 2008-10-15
+does not produce Lehman's daily bars, and Webull returns INVALID_SYMBOL
+for the ticker. Public data lets us **detect** contamination and
+**measure** the hole. Filling it still needs a vendor with permanent
+security identifiers and dead-company price history.
+
+The Sharadar case therefore narrows to exactly one thing — prices for
+companies that no longer exist — and D2 is what tells us whether that
+one thing is worth paying for, before paying for it.
+
+### Batch 8 complete — two findings the holdout alone could not show
+
+The full sweep across all three windows. Account figures are a $100,000
+account with idle cash paid the rate of the period.
+
+**1. Relative strength is monotone in every window, on both measures.**
+
+| window | RS>15 | RS>20 | RS>25 | monotone |
+|---|---|---|---|---|
+| derive | 41.2% / +8.15% | 41.8% / +9.07% | 42.9% / +10.05% | yes |
+| test | 38.3% / +4.46% | 38.6% / +4.48% | 39.1% / +5.05% | yes |
+| holdout | 41.6% / +7.22% | 42.0% / +7.87% | 42.1% / +8.05% | yes |
+
+Win rate *and* mean per trade both rise with relative strength, in three
+independent windows, without exception. Nothing else measured in this
+project has replicated that cleanly. The monotonicity screen was adopted
+because a random ordering comes out monotone about one time in six; three
+windows agreeing on two measures is a different order of evidence.
+
+**But tightening the gate does not improve the account.** Account return
+across those same arms is 10.47 / 10.35 / 10.32 on derive and 9.99 /
+10.17 / 9.85 on test — flat, because every trade removed is capital left
+idle. The quality gained and the participation lost cancel.
+
+That is the argument for **M8**, and it is now an evidenced one rather
+than an analogy to the literature: relative strength carries a real
+gradient, and a threshold is the one way of using a gradient that throws
+it away. Ranking keeps the ordering without cutting participation.
+
+**2. The 52-week-high condition points the wrong way.**
+
+| window | below>5% | below>7% | below>10% |
+|---|---|---|---|
+| derive | **42.7%** / +9.01% | 41.8% / +9.07% | 40.3% / +9.49% |
+| test | **39.9%** / +4.65% | 38.6% / +4.48% | 37.5% / +4.24% |
+| holdout | 41.9% / +7.19% | **42.0%** / +7.87% | 41.4% / +7.71% |
+
+The mined rule demands a stock sit at least 7% below its 52-week high.
+Win rate falls as that discount is widened, clearly in two windows and
+flat in the third — the requirement is at best doing nothing and at
+worst costing us. Mean per trade disagrees on derive and agrees on test,
+so the case rests on win rate.
+
+It also runs against the documented 52-week-high effect, where proximity
+to the high predicts outperformance rather than the reverse. I mined
+this threshold out of the winners and never asked whether its *sign* was
+right.
+
+### R24 — drop or invert the 52-week-high requirement `[data]` `[defect]`
+Three arms on the full R20 configuration: the condition removed
+entirely; the condition inverted to require price *within* 7% of the
+high; and R20 unchanged as the matched control, run last.
+
+**Expectation:** removal is neutral-to-positive and inversion is
+positive. If inversion wins clearly, the mined filter was carrying a
+sign error through every result in this file, and R19/R20's measured
+edge came from its other two components in spite of this one.
+
+---
+
+## Batch 9 result — the bear-market edge is the method's, not R20's
+
+The 2005-2009 reference arm finally exists, and it settles the question
+raised when that window first showed an unexpectedly large margin.
+
+$100,000 account, idle cash paid the rate of the period.
+
+| window | SPY | baseline (9 conditions) | R20 |
+|---|---|---|---|
+| 2005-2009 | +0.80% | **+8.06%** | **+9.69%** |
+| 2010-2020 | +13.61% | +8.96% | +10.34% |
+| 2021-2026 | +11.78% | +7.39% | +10.21% |
+
+**The plain nine-condition checklist already captures nearly all of it.**
+R20 adds about 1.6 points in that window; it does not create the effect.
+Stage analysis as written is what sits out a bear market — and it does so
+without anything in the rule consulting a calendar or an index level
+beyond the market-stage condition, which batch 7 showed barely binds.
+
+### Chained across the whole period
+
+Indicative rather than exact — the holdout runs a 1,257-name universe
+against the other windows' 2,627, so this compounds three results that
+are not on identical footing.
+
+| | growth of $100,000 | CAGR | worst drawdown |
+|---|---|---|---|
+| SPY buy and hold | $759,970 | 10.01% | -54.6% |
+| baseline | $550,583 | 8.36% | -15.4% |
+| **R20** | **$780,833** | **10.15%** | **-20.3%** |
+
+Return per unit of worst drawdown: SPY 0.18, R20 0.50, baseline 0.54.
+
+**Every headline in this file up to now said the strategy loses to the
+index.** Across a full cycle containing a crash, R20 matches it — 10.15%
+against 10.01% — while falling less than half as far at the worst point.
+That is not a better index tracker. It is a different risk profile, and
+it is the profile trend-following is documented to have: lagging through
+sustained advances, protecting through drawdowns.
+
+The windows I had been scoring on were two bull markets and one crash,
+and I was averaging over them as though the strategy claimed to win in
+all three.
+
+### Four reasons this is softer than it looks, three of them downward
+
+1. **Survivorship**, unquantified, and heaviest in 2005-2009 — the
+   window carrying most of the result. Batch 16 exists to measure this.
+2. **Drawdown is understated.** Open positions are valued at cost, so an
+   unrealised loss shows nothing until it closes. M1 fixes it and will
+   make these numbers worse.
+3. **No transaction costs** anywhere. M6.
+4. **Chaining across universes**, as noted above.
+
+The one thing pointing the other way is that the effect appears in the
+baseline as well as in R20, so it does not depend on any of the tuning
+done in this file — which is the part of the result least likely to
+evaporate.
+
+---
+
+## D1 and D2 results — the identity fix, and the size of the hole
+
+### D1: the naive detector was wrong, and by a lot
+
+Resolved all 5,803 cached symbols against EDGAR (24 minutes, one request
+each, now cached in `security_identity` so it never repeats).
+
+The first version tested one thing: does cached history predate the
+first filing of the company currently holding the ticker? That flagged
+**605 symbols, and 91% were false positives** — XOM, BlackRock, Bunge,
+Six Flags and hundreds more. Those companies re-registered as new legal
+entities (redomiciling, holding-company restructures, mergers) and got
+fresh CIKs while the same business kept trading under the same ticker
+without missing a day.
+
+**A new CIK is not a new company.** I built the detector on the
+assumption that it was.
+
+The fix requires a second signal: a genuinely recycled ticker leaves a
+**trading gap**, because the old company delists and the new one lists
+months or years later, while a reorganisation leaves none.
+
+| test | flagged |
+|---|---|
+| CIK first-filing date alone | 605 |
+| plus a real trading gap (>120 days) | **57** |
+
+About 1% of the universe, not 10%. The 7-day "gaps" being flagged were
+the weekly bar cadence.
+
+Worth recording how close this came to doing damage: the first report
+would have recommended trimming history for 605 symbols, which would
+have discarded legitimate data for several hundred major names. What
+caught it was reading the output rather than the count — XOM at the top
+of a contamination list is visibly wrong.
+
+### D2: the survivorship hole is the same order as the sample
+
+Every delisting notice filed with the SEC from 2004 to 2026, taken from
+the quarterly form indexes: **36,346 notices, 11,448 distinct
+companies**, all free.
+
+| window | names screened | delisted **and absent from our data** |
+|---|---|---|
+| 2005-2009 | 1,257 | **2,805** |
+| 2010-2020 | 2,627 | 4,867 |
+| 2021-2026 | 2,627 | 2,932 |
+
+More companies left the 2005-2009 market than we ever looked at, by more
+than two to one.
+
+**This overstates the true hole** and the reason matters: Form 25 covers
+every security removed, including ETFs, closed-end funds, preferred
+shares, warrants and micro-caps that our universe filter would never
+have screened. The relevant hole is smaller than 2,805.
+
+It cannot be argued down to small, though, and that is the finding. The
+missing population is the same order of magnitude as the measured one.
+This is not a correction to the edges of a result; it is a question
+about whether the result describes the market or describes the
+survivors.
+
+**Batch 16's registered criterion is therefore met.** The question was
+whether the hole is large enough to justify buying prices for dead
+companies, decided before paying. It is.
+
+### What is still unresolved: the sign
+
+Whether survivorship inflates or deflates our figures depends on why
+companies left, and both directions are present. Acquisitions usually
+completed at a premium, so their absence makes results look *worse*.
+Failures make them look *better*. Everyone assumes the second dominates;
+nobody here has checked.
+
+Classification by filing history is running. It is a proxy and is
+labelled as one: merger paperwork (S-4, 425, DEFM14A) before the
+delisting notice indicates a deal, but **nothing in EDGAR's form types
+marks a bankruptcy** — Chapter 11 appears inside an 8-K's items, which
+the index does not expose. So "no merger paperwork" is a residual
+bucket, not a synonym for failure, and must not be reported as one.
+
+### Batch 10 result — R21, and volume confirmation as a participation tax
+
+R21 is R20 with volume confirmation left *in*. Nothing else differs.
+
+| window | R21 (volume kept) | R20 (volume dropped) | SPY |
+|---|---|---|---|
+| 2010-2020 | 2,971 trades, +9.39%/yr | 3,578 trades, **+10.34%** | +13.61% |
+| 2021-2026 | 3,123 trades, +9.54%/yr | 3,800 trades, **+10.21%** | +11.78% |
+| 2005-2009 | 1,158 trades, +9.46%/yr | 1,530 trades, **+9.69%** | +0.80% |
+
+Dropping volume wins in all three windows, by 0.95, 0.67 and 0.23
+points. Only the first is close to clearing its seed spread, so
+individually none of these is decisive — but the direction is 3 for 3,
+and the per-trade numbers say why.
+
+**Per-trade quality is unchanged.** Win rate 42.1 vs 41.8, 37.4 vs 38.6,
+42.0 vs 42.0. Mean +8.96 vs +9.07, +4.04 vs +4.48, +8.11 vs +7.87.
+Mixed, small, no pattern.
+
+**What the condition actually does is remove 17-20% of trades.** It
+does not pick better ones; it picks fewer. And batch 14 already
+established what that is worth: discarding signals at random was
+comprehensively beaten by the mined filter, so thinning without
+selection buys nothing and costs participation.
+
+That is the third independent verdict on volume confirmation — the
+per-condition analysis measured +1.84% either way, R16 dropped it with
+no harm, and R21 now shows the cost of keeping it — and the first one
+with a mechanism attached. It is a participation tax, not a filter.
+
+**On the checklist as a whole.** Two of the nine conditions have now
+been shown to measure nothing (volume, risk/reward), two of the three
+non-negotiable vetoes never reject anything, and one mined threshold is
+under suspicion of having the wrong sign. The parts of this system that
+demonstrably carry information are a small minority of its apparent
+complexity.
+
+### D2 continued — why the missing companies left, and why it may not be what I said
+
+9,625 companies absent from our universe, each checked against its full
+EDGAR filing history for merger paperwork (S-4, 425, DEFM14A, SC 14D9,
+SC TO-T) filed on or before its delisting notice. No errors.
+
+| window | merger-related | everything else | merger share |
+|---|---|---|---|
+| 2005-2009 holdout | 1,509 | 1,296 | 54% |
+| 2010-2020 derive | 2,765 | 1,633 | 63% |
+| 2021-2026 test | 1,484 | 938 | 61% |
+| **all** | **5,758** | **3,867** | **60%** |
+| *2008 alone* | *337* | *330* | *51%* |
+
+**The majority of missing companies were acquired, not failed** — in
+every window. I have been describing survivorship bias as something that
+inflates our results, which assumes the opposite composition. That
+assumption is not supported here.
+
+The 2008 column is a useful sanity check on the classifier: the crash
+year is the most balanced at 51%, which is what should happen if the
+method is tracking something real rather than returning noise.
+
+### Four reasons to hold this loosely, and one that matters more than the rest
+
+1. **"Everything else" is not "failed."** It holds going-private
+   transactions, exchange transfers, voluntary deregistrations and
+   reverse mergers alongside genuine failures. It is a residual, and
+   reporting it as a failure count would overstate failures badly.
+2. **Count is not magnitude.** A bankruptcy can take 100%; an
+   acquisition premium is typically 20-40%. A 60/40 split by count can
+   still be dominated by the smaller bucket, and nothing here measures
+   severity.
+3. **Merger paperwork is a proxy.** It establishes a deal was in
+   progress, not that it closed at a premium.
+4. **Our own selection interacts with this, asymmetrically.** The
+   strategy buys Stage 2 — stocks already rising. A company heading for
+   bankruptcy is in Stage 4 by then and the screener would rarely buy it
+   at all, or would stop out early if it did. An acquisition target is
+   frequently rising into the deal, which is exactly what this system
+   buys, and the premium would land as a large winner. So the missing
+   population is not missing *symmetrically*: we are more exposed to the
+   acquisitions we cannot see than to the failures we would mostly have
+   avoided.
+
+Point 4 is the one that could flip the sign. It is also the one that
+cannot be settled without prices for the dead companies, which is
+precisely what the vendor supplies.
+
+**Net effect on the Sharadar decision: the case is stronger, not
+weaker.** The hole is the same order of magnitude as the sample, and
+after this it is no longer safe to assume its direction — so the
+correction cannot be estimated, only measured.
+
+### Batch 11 result — void. The short side had no cap on its stop.
+
+The run produced trades losing **2,573%**, **3,759%** and **10,444%**. A
+short with a protective buy-stop cannot do that, so the numbers were a
+defect rather than a finding, and none of them are reported here as
+short-selling performance.
+
+**The cause.** `short_conditions.MAX_SENSIBLE_STOP_PCT` existed and was
+being measured — but only to set `risk_reward = False`. That is one
+condition out of eight, and the 80% scoring ratio outvotes a single
+failure, so the trade proceeded anyway. The check also sat inside
+`if prior_low and price`, so whenever no target level was found it never
+ran at all.
+
+**Why it only bit the short side.** A long's stop sits below entry, so
+even an absurd one costs at most the position. A short's sits *above*
+and is unbounded. The engine entered APLD at $0.03 with its stop at a
+prior resistance of $0.80 — a 26x risk, taken as a legitimate setup
+because seven of eight conditions passed.
+
+**Why it surfaced now.** The original floor of 7-of-8 was arithmetically
+unreachable and admitted only 123 trades, which happened to exclude
+every pathological setup. Correcting the floor admitted ten times as
+many and exposed a second defect that had been sitting behind the first.
+The floor-7 control arms in this very run look clean — worst case -33% —
+which is exactly how the bug stayed hidden.
+
+**The fix.** `run_short_backtest` now rejects any setup whose stop sits
+more than MAX_SENSIBLE_STOP_PCT above entry — a hard rejection, not a
+failed condition. On a 250-name sample the same configuration produces
+183 trades, none losing more than 100%, worst case -14.3%.
+
+Three regression tests, one of which anchors on the real APLD numbers
+rather than an invented example.
+
+**This is the third time stop placement has produced a plausible,
+completely wrong result in this project**, after the two recorded in
+my project notes. The pattern is consistent enough to be worth stating as a
+rule: any change that alters which trades qualify should be followed by
+checking the worst case, not just the average. Every one of these was
+visible in the tail and invisible in the mean.
+
+S7 re-runs against the corrected engine.
+
+### Batch 12 result — R6 works as designed, on a problem smaller than I claimed
+
+| window | no stall exit | stall at 13 weeks | stall at 26 weeks |
+|---|---|---|---|
+| 2010-2020 | +10.35%/yr | +10.34% (280 stalled) | +10.31% (7 stalled) |
+| 2021-2026 | +10.17%/yr | **+10.73%** (274 stalled) | +10.44% (10 stalled) |
+| 2005-2009 | +9.63%/yr | **+9.70%** (145 stalled) | +9.50% (5 stalled) |
+
+**The registered signature appeared.** Mean per trade fell in all three
+windows — +9.07 to +8.71, +4.48 to +4.45, +7.87 to +7.16 — exactly as
+predicted, because the positions being cut are ones that might have
+recovered. That is the mechanism working, and it is worth more than the
+headline: had mean per trade *risen*, the expectation recorded in
+advance said to be suspicious rather than pleased.
+
+**The account gains are marginal.** +0.56 and +0.07 points in two
+windows, flat in the third, against seed spreads of about 1. Directional
+at best.
+
+**The 26-week arm is inert.** Five to ten trades affected out of
+thousands. Trade counts land identical to the control in two windows,
+which under the standing rule demands checking whether the parameter
+applied at all — it did, the log records the stalls, and there simply is
+almost nothing to cut at that horizon.
+
+### The hypothesis behind R6 was wrong
+
+I built this on the claim that a position going sideways "holds capital
+indefinitely — and with the hold cap removed, indefinitely is literal".
+The control arm's own hold distribution says otherwise:
+
+| | weeks |
+|---|---|
+| median hold | 12 |
+| 75th percentile | 21 |
+| 90th percentile | 29 |
+| still open at 13 weeks | 44% |
+| still open at 26 weeks | 13% |
+
+Positions resolve quickly. Only 13% survive six months, so there was
+never a large pool of dead capital to release, and a stall exit could
+not have produced a large gain no matter where the threshold sat.
+
+The reasoning was plausible and I did not check the hold distribution
+before building it — a two-line query that was available the whole time
+and would have predicted this result in advance. Worth recording as a
+process note rather than a result: the cheap descriptive check belongs
+*before* the expensive experiment, not after it.
+
+R6a is kept as an option, off by default. It is directionally positive,
+costs nothing when disabled, and its real value may be in a live
+portfolio where holding a stalled position has an opportunity cost the
+backtest cannot see.
+
+### R24 result — the sign was right. I read the wrong metric.
+
+| window | | trades | win | mean | account |
+|---|---|---|---|---|---|
+| derive | R20 (below the high) | 3,578 | 41.8% | +9.07% | **+10.34%** |
+| | test removed | 4,658 | 44.5% | +8.77% | +11.03% |
+| | inverted (near the high) | 3,437 | **48.5%** | +8.14% | +9.52% |
+| test | R20 (below the high) | 3,800 | 38.6% | +4.48% | **+10.21%** |
+| | test removed | 4,623 | 40.6% | +4.49% | +8.53% |
+| | inverted (near the high) | 3,080 | **42.7%** | +3.95% | +9.11% |
+| holdout | R20 (below the high) | 1,530 | 42.0% | +7.87% | **+9.69%** |
+| | test removed | 1,831 | 41.6% | +6.63% | +8.50% |
+| | inverted (near the high) | 1,207 | **43.8%** | +4.50% | +7.80% |
+
+**Inverting raises win rate in all three windows and lowers account
+return in all three.** Removing the condition helps only on derive and
+hurts on both other windows. The original threshold, mined from the
+winners, is the best of the three.
+
+**Why the batch 8 reading was wrong.** I flagged this condition as
+having a possible sign error because win rate fell as the required
+discount widened. That was a real pattern and an irrelevant one. Buying
+a stock that has pulled back from its high produces fewer winners and
+*bigger* ones; buying near the high produces more winners and smaller
+ones. Mean per trade moves opposite to win rate at every single row
+above.
+
+This project has already recorded that its returns are concentrated —
+the top 25 trades carry 51% of profit under R20, and over 100% under the
+baseline. A strategy living on a fat right tail is not improved by
+trading magnitude for hit rate, and **win rate is close to worthless as
+an objective here.** I know that, it is written down two sections
+earlier, and I still read a win-rate gradient as evidence of quality.
+
+The claim in the batch 8 write-up that "the 52-week-high condition points
+the wrong way" is withdrawn. It points the right way. What it does is
+trade hit rate for size, deliberately, which is what this strategy needs.
+
+**One genuinely open thread.** Removing the condition was the best arm on
+derive (+11.03%) and the worst-but-one elsewhere. That is the shape of
+noise rather than a finding, but it does say the condition earns its
+place mainly in the two windows it was not mined on — which is the right
+way round, and mildly reassuring about the mining.
