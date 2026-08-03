@@ -147,6 +147,16 @@ MINED_RS_MIN = 20.0
 MINED_PCT_BELOW_HIGH = 7.0
 MINED_MIN_BASE_PCT = 35.0
 
+# Which side of MINED_PCT_BELOW_HIGH counts as a pass. I mined the
+# threshold's *value* out of the winners and never questioned its
+# *sign*. Batch 8 swept it and win rate falls as the required discount
+# widens — 42.7 / 41.8 / 40.3 on derive and 39.9 / 38.6 / 37.5 on test
+# across 5 / 7 / 10 percent — so demanding a deeper discount is at best
+# doing nothing. That also runs against the documented 52-week-high
+# effect, and against the book, which buys strength rather than
+# discount. True requires price *within* the threshold of the high.
+MINED_REQUIRE_NEAR_HIGH = False
+
 # Kept for reference: the legacy absolute threshold this replaced.
 ACTIONABLE_THRESHOLD = 8
 
@@ -1123,8 +1133,11 @@ def _mined_filter_passes(rs, pct_below_52w_high, base_range_pct):
     """
     if rs is None or pct_below_52w_high is None or base_range_pct is None:
         return False
+    near_high = (pct_below_52w_high < MINED_PCT_BELOW_HIGH
+                 if MINED_REQUIRE_NEAR_HIGH
+                 else pct_below_52w_high > MINED_PCT_BELOW_HIGH)
     return (rs > MINED_RS_MIN
-            and pct_below_52w_high > MINED_PCT_BELOW_HIGH
+            and near_high
             and base_range_pct > MINED_MIN_BASE_PCT)
 
 
