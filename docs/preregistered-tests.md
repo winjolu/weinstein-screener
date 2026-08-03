@@ -2393,3 +2393,58 @@ Return alone is no longer an adequate score for any future arm. The
 comparison table should carry Martin and weeks-under-water beside CAGR,
 because those are the two that would have contradicted my conclusions
 earliest and did so the moment they were computed.
+
+### K1 result — the direction is real, the size is not, and the test is weak
+
+`screener/neighbours.py`. Fit on entries 2009-2015, scored on 2016-2020,
+21 features, k=25, predicting the share of neighbours that returned more
+than 50%.
+
+Paired against ranking on relative strength alone, 60 samples of 400
+signals each. Paired because both rankings score the *same* sample, so
+the sampling noise that made the unpaired ranges useless cancels.
+
+| | |
+|---|---|
+| KNN wins the pair | **47 of 60 (78%)** |
+| mean advantage | +2.91 points |
+| 5th-95th percentile | **-2.44 to +9.01** |
+
+**The sign test says something is there.** 47 of 60 under a coin-flip
+null is roughly a one-in-ten-thousand result.
+
+**The magnitude interval says we cannot size it.** The band straddles
+zero, and the registered criterion was explicit that this means no
+finding. Both are true at once because the target is fat-tailed: KNN
+more often puts better signals on top, and a handful of samples where
+relative strength happened to catch a monster wipe out the average
+advantage.
+
+**And the test is weaker than it looks.** Features exist only for the
+derivation window, so this is out of sample in *time* but not in regime
+— 2016-2020 is the back half of the same bull market the rule was mined
+in. A real answer needs the feature miner run over the test and holdout
+windows, which is queued and is the only version worth quoting.
+
+### What was wrong the first time
+An exploratory pass produced a similar-looking result, which I then
+dismissed on the grounds that the relative-strength baseline was
+"mostly ordering missing values". That was wrong, and the output printed
+directly above the claim contradicted it: 595 of 600 scored signals
+carried a relative strength value. I had written the conclusion into the
+print statement before reading the data.
+
+The real defect was different and worth keeping: the feature filter
+dropped any column with a single missing value anywhere, which excluded
+relative strength itself over 50 gaps in 6,151 rows — the one feature
+with a monotone gradient in all three windows. Missing values are now
+imputed to the fit-set median per feature rather than costing a whole
+column.
+
+### On the vector database, settled
+Not needed and recorded so it is not revisited by default. This index is
+6,151 rows by 21 features — 1.3MB, and exact search takes milliseconds.
+Approximate-nearest-neighbour infrastructure is a speed optimisation for
+millions of vectors under latency pressure; here it would trade
+exactness for nothing. Revisit if features are ever mined at every bar
+across the daily history, which would be roughly 14 million vectors.
