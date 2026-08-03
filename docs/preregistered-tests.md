@@ -2491,3 +2491,51 @@ question for the mined filter — does this select, or merely thin? — has
 not been run here and should be before anything is adopted.
 
 Left off by default, as registered.
+
+### R25 continued — the ceiling selects, and still is not worth it
+
+The control the previous section said had to run before anything was
+adopted. 30 random draws from the uncapped arm, matched to the capped
+arm's trade count.
+
+| window | | max drawdown | Martin |
+|---|---|---|---|
+| 2005-2009 | 15% ceiling | -9.0% | 1.16 |
+| | random, same size | -8.1% (best -6.1%) | **1.74** |
+| 2010-2020 | 15% ceiling | **-7.9%** (beats all 30) | 0.52 |
+| | random, same size | -18.6% (best -11.7%) | **0.60** |
+| 2021-2026 | 15% ceiling | **-7.9%** (beats all 30) | 0.92 |
+| | random, same size | -13.4% (best -9.5%) | **1.01** |
+
+**It genuinely selects on drawdown.** In two windows the ceiling beats
+every one of thirty random draws of the same size. That is not thinning,
+it is the rule doing what it claims.
+
+**And random thinning still has a better Martin in all three windows.**
+Taking the same number of trades at random delivers more return per unit
+of pain than deliberately removing the wide-stop ones.
+
+**Why, and it is the pattern this project keeps meeting.** The ceiling
+truncates both tails. The right tail is worth more than the left tail
+costs — the same setups that occasionally lose 85% are the ones that
+occasionally return several hundred percent, and the top 5% of trades
+carry 88-144% of all profit. Cutting the disasters cuts the monsters.
+
+### Verdict
+Not adopted, and the reason is now specific rather than cautious. The
+book's stop rule is real risk control and a poor efficiency trade: it
+buys drawdown reduction at a cost in return greater than the drawdown is
+worth, on every risk-adjusted measure computed here.
+
+It would be rational for someone whose binding constraint is drawdown
+rather than return — someone who would abandon the strategy in a 30%
+fall and therefore needs the 8% version to stay invested at all. That is
+a real person and possibly the person this is being built for, which is
+why the option stays in the engine rather than being removed.
+
+**What this does not excuse.** The defect the ceiling was built to fix
+is still a defect: the engine was taking trades with stops 36% below
+entry and losing 85% on single positions because a check existed and was
+never enforced. Declining to cap at 15% is not the same as having no
+opinion about a stop at 36%. A wider ceiling — 25% or 30% — was never
+tested against the thinning control and is the obvious next question.
