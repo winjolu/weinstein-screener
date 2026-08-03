@@ -2539,3 +2539,40 @@ entry and losing 85% on single positions because a check existed and was
 never enforced. Declining to cap at 15% is not the same as having no
 opinion about a stop at 36%. A wider ceiling — 25% or 30% — was never
 tested against the thinning control and is the obvious next question.
+
+### R25 closed — no ceiling width survives the thinning control
+
+The open question was whether a wider ceiling would trade better than
+15%. It does not, and neither does any width tested.
+
+Martin ratio against 25 random draws matched on trade count:
+
+| window | 25% | 20% | 15% |
+|---|---|---|---|
+| 2005-2009 | 0.61 vs 0.81 | 0.63 vs 1.09 | 1.16 vs 1.70 |
+| 2010-2020 | 0.77 vs 0.74 | 0.78 vs 0.70 | 0.52 vs 0.59 |
+| 2021-2026 | 0.72 vs 0.73 | 0.73 vs 0.85 | 0.92 vs 0.99 |
+
+Eight of nine at or below the random median, and the two exceptions beat
+only the median rather than the best draw — in the derivation window,
+which is the one every threshold here was mined on.
+
+**Closed: the stop ceiling is not an efficiency improvement at any width
+tested.** It stays off by default and stays in the engine, because
+genuine drawdown control is worth something to someone who would
+otherwise abandon the strategy in a 30% fall. It is not worth anything
+to someone maximising return per unit of pain.
+
+**A performance defect found while running this.** `_price_index` was
+rebuilt from the whole 5,809-symbol universe on every call to
+simulate_fixed_capital, so scoring twenty-five draws rebuilt it
+twenty-five times and the comparison timed out. Caching it made the run
+fifteen times faster.
+
+The first cache keyed on `id()`, which is unsafe: CPython reuses
+addresses after garbage collection, so a temporary bar dict can inherit
+the index built for a different one and positions get valued against
+another symbol set entirely. A test caught it immediately by creating
+two dicts that were collected between calls. The cache now holds a
+reference to the dict itself, which prevents the address being reused
+while the entry lives.

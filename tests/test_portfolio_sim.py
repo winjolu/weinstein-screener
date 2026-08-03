@@ -845,3 +845,39 @@ class RiskAdjustedTest(unittest.TestCase):
         annual = portfolio_sim.risk_adjusted(curve, 10.0, periods_per_year=1.0)
         self.assertAlmostEqual(annual["sortino"] / weekly["sortino"],
                                52.0 ** 0.5, places=4)
+
+    def test_the_price_index_is_built_once_per_bar_set(self):
+        # It is built from the whole universe, and every simulation call
+        # was rebuilding it. Scoring 25 random draws rebuilt it 25 times
+        # and turned a two-minute comparison into a timeout.
+        bars = {"AAA": [{"time": "2020-01-01", "close": 10.0}]}
+        first = portfolio_sim._price_index(bars)
+        second = portfolio_sim._price_index(bars)
+        self.assertIs(first, second)
+
+    def test_a_different_bar_set_gets_its_own_index(self):
+        # Both dicts are kept alive deliberately. An earlier version let
+        # them be collected, CPython reused the address, and the cache
+        # handed the second set the first one's index — which in a real
+        # run means valuing positions against another symbol set
+        # entirely. The cache now holds a reference so the address
+        # cannot be reused while the entry lives.
+        first = {"AAA": [{"time": "2020-01-01", "close": 10.0}]}
+        second = {"BBB": [{"time": "2020-01-01", "close": 20.0}]}
+        a = portfolio_sim._price_index(first)
+        b = portfolio_sim._price_index(second)
+        self.assertIsNot(a, b)
+        self.assertIn("AAA", a)
+        self.assertIn("BBB", b)
+
+    def test_a_recycled_address_cannot_inherit_a_stale_index(self):
+        # The failure directly: build an index for a temporary dict, drop
+        # it, then build many more and check none of them ever comes back
+        # holding the wrong symbols.
+        import gc
+        portfolio_sim._price_index({"GHOST": [{"time": "2020-01-01", "close": 1.0}]})
+        gc.collect()
+        for i in range(50):
+            fresh = {f"S{i}": [{"time": "2020-01-01", "close": float(i)}]}
+            index = portfolio_sim._price_index(fresh)
+            self.assertNotIn("GHOST", index)
