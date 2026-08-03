@@ -2179,3 +2179,52 @@ is not, and it had been sitting in this file unchallenged for the whole
 project.
 
 **Everything above this section that cites a drawdown is understated.**
+
+---
+
+## M6 result — the breakeven sweep, and a broker-agnostic cost model
+
+Costs are now a `BrokerProfile` — commission per trade, per share and
+percentage, minimums and caps, regulatory pass-throughs, borrow rate —
+with Webull shipped as one profile among several rather than as the
+assumption. A user drops in their own broker.
+
+**The broker is not the problem.** Webull's schedule on a $1,000
+position is $0.0305 round trip, about 0.003%, against a mean trade near
++8%. Modelling it exactly is close to pointless and was done anyway
+because it costs nothing to be right.
+
+**Spread and slippage are the problem**, and nobody charges them — you
+pay them to the market. So the registered test was never a point
+estimate; it is how much friction the edge survives.
+
+$100,000 account, R20, Webull fees plus slippage charged on *both* sides:
+
+| slippage per side | 2005-2009 | 2010-2020 | 2021-2026 |
+|---|---|---|---|
+| 0% | 9.55% | 10.50% | 10.43% |
+| 0.05% | 9.47% | 10.31% | 9.84% |
+| 0.25% | 8.75% | 9.85% | 9.13% |
+| 0.50% | 8.09% | 9.22% | 7.78% |
+| 1.00% | 6.45% | 7.79% | 5.19% |
+| 2.00% | 3.02% | 4.19% | 0.69% |
+| **buy and hold** | **0.80%** | **13.61%** | **11.78%** |
+
+**Degradation is roughly linear** at about 2 points of annual return per
+1% of per-side slippage. Nothing falls off a cliff, which is the good
+news; nothing is immune either.
+
+**The bear-market advantage survives heavy friction.** Through 2005-2009
+the strategy still returns 3.02% against the index's 0.80% at a
+punishing 2% per side. That is the one window where this system's case
+lives, and it is the window most robust to cost.
+
+**The bull-market windows were already behind at zero cost**, so cost
+does not change that verdict, it only deepens it.
+
+**What this means practically.** Large caps trade at spreads well under
+0.1%, where the strategy loses well under a point a year. The small
+community banks in this universe can run 1-2%, where it loses three to
+five. That argues for a liquidity floor in the universe filter — which
+is not currently registered and should be, because the alternative is a
+strategy whose returns depend on names it cannot actually trade cheaply.
