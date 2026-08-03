@@ -656,6 +656,22 @@ def run_short_backtest(tickers, start_date, end_date, check_interval_weeks=4,
                 # inventing a stop.
                 continue
 
+            stop_pct = (result["buy_stop"] - entry_price) / entry_price * 100
+            if stop_pct > short_conditions.MAX_SENSIBLE_STOP_PCT:
+                # A hard rejection, not a failed condition. short_conditions
+                # already measures this, but only to set risk_reward False —
+                # one vote out of eight, which the 80% ratio outvotes, and
+                # it is skipped entirely when no target level was found.
+                #
+                # The asymmetry is what makes that inadequate. A long's stop
+                # sits below entry so a bad one costs at most the position.
+                # A short's sits above and is unbounded: entering a $0.03
+                # stock with the stop at a prior resistance of $0.80 is a
+                # 26x risk, and that is how this backtest produced trades
+                # losing 2,573% and 10,444%. Those were not short selling
+                # behaving badly, they were a stop nobody was capping.
+                continue
+
             trade = simulate_short_trade(
                 ticker, bars_full[entry_idx]["time"][:10], entry_price,
                 result["buy_stop"], result["target"], bars_full,
