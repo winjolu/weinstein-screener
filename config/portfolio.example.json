@@ -1,0 +1,14 @@
+{
+  "_comment": "Copy to config/portfolio.json, which is gitignored. Real holdings never enter this repository.",
+  "cash": 25000.0,
+  "positions": [
+    {
+      "ticker": "EXAMPLE",
+      "shares": 100,
+      "cost_basis": 42.5,
+      "stop": 38.25,
+      "entry_date": "2026-01-15",
+      "note": "why I bought it, in my own words"
+    }
+  ]
+}

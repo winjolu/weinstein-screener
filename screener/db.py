@@ -134,6 +134,29 @@ CREATE TABLE IF NOT EXISTS delisting_events (
     PRIMARY KEY (cik, form, filed_date)
 );
 
+-- What the system suggested, and what was actually done about it.
+--
+-- The only forward evidence this project will ever produce. Everything
+-- in docs/ is a backtest over history I have already read, on an engine
+-- whose defects keep surfacing. A row written before the outcome is
+-- known cannot be tuned after the fact.
+--
+-- Suggestions NOT acted on are kept deliberately: a log of only the
+-- trades taken measures my judgement as much as the system's,
+-- and the gap between them is the interesting part.
+CREATE TABLE IF NOT EXISTS recommendations (
+    ticker TEXT NOT NULL,
+    suggested_on TEXT NOT NULL,
+    action TEXT NOT NULL,
+    shares REAL,
+    price REAL,
+    stop REAL,
+    rationale TEXT,
+    taken TEXT,
+    taken_note TEXT,
+    PRIMARY KEY (ticker, suggested_on, action)
+);
+
 CREATE TABLE IF NOT EXISTS backtest_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker TEXT NOT NULL,
@@ -380,6 +403,54 @@ def cache_sector(ticker, sector):
             (ticker, sector, datetime.date.today().isoformat()),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def save_recommendation(row):
+    """Record a suggestion. Replaces on the same ticker/date/action so a
+    re-run of the same day corrects rather than duplicates."""
+    conn=_connect()
+    try:
+        conn.execute(
+            """INSERT OR REPLACE INTO recommendations
+               (ticker, suggested_on, action, shares, price, stop, rationale,
+                taken, taken_note)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (row["ticker"], row["suggested_on"], row["action"], row.get("shares"),
+             row.get("price"), row.get("stop"), row.get("rationale"),
+             row.get("taken"), row.get("taken_note")))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_recommendation(ticker, suggested_on, taken, note=None):
+    """Record what was done about a suggestion. `taken` is stored as text
+    so "bought half" and "waited a week" survive as themselves rather
+    than being flattened into yes or no."""
+    conn=_connect()
+    try:
+        conn.execute(
+            """UPDATE recommendations SET taken = ?, taken_note = ?
+               WHERE ticker = ? AND suggested_on = ?""",
+            (str(taken), note, ticker, suggested_on))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_recommendations(ticker=None):
+    conn=_connect(); conn.row_factory=sqlite3.Row
+    try:
+        if ticker:
+            rows=conn.execute(
+                "SELECT * FROM recommendations WHERE ticker = ? ORDER BY suggested_on",
+                (ticker,)).fetchall()
+        else:
+            rows=conn.execute(
+                "SELECT * FROM recommendations ORDER BY suggested_on").fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
 

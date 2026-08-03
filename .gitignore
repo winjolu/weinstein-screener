@@ -9,3 +9,4 @@ reference/
 conf/
 *.log*
 NOTES.md
+config/portfolio.json
