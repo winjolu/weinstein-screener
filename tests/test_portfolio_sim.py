@@ -547,3 +547,100 @@ class FixedCapitalTest(unittest.TestCase):
             priority=lambda t: t["conditions_met"])["ending_equity"]
             for s in range(15)}
         self.assertGreater(len(equities), 1)
+
+
+class MarkToMarketTest(unittest.TestCase):
+    """Drawdown measured on open positions, not just closed ones.
+
+    Carrying an open position at cost means an unrealised loss shows
+    nothing until the trade closes, so worst_drawdown only ever sees
+    damage already realised. Every defensive claim this project makes
+    rests on drawdown, which made that the most important number in the
+    codebase and the one measured wrong.
+    """
+
+    TRADE = [{"ticker": "AAA", "entry_date": "2020-01-01", "exit_date": "2020-06-01",
+              "entry_price": 10.0, "return_pct": 0.0, "still_open": 0}]
+    BARS = {"AAA": [{"time": "2020-01-01", "close": 10.0},
+                    {"time": "2020-03-01", "close": 4.0},
+                    {"time": "2020-06-01", "close": 10.0}]}
+
+    def test_cost_basis_hides_an_unrealised_loss(self):
+        # The behaviour being corrected. A position that halved and
+        # recovered shows no drawdown at all.
+        acct = portfolio_sim.simulate_fixed_capital(self.TRADE, capital=5000.0)
+        self.assertFalse(acct["marked_to_market"])
+        self.assertEqual(acct["worst_drawdown"], 0.0)
+
+    def test_marking_to_market_reveals_it(self):
+        # 100 shares at $10, down to $4: a $600 fall the account would
+        # have watched happen.
+        acct = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=5000.0, bars_by_symbol=self.BARS)
+        self.assertTrue(acct["marked_to_market"])
+        self.assertAlmostEqual(acct["worst_drawdown"], -600.0, delta=1.0)
+
+    def test_the_final_return_is_unchanged_either_way(self):
+        # Marking changes the path, not the destination. If ending equity
+        # moves, the valuation has leaked into realised profit.
+        plain = portfolio_sim.simulate_fixed_capital(self.TRADE, capital=5000.0)
+        marked = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=5000.0, bars_by_symbol=self.BARS)
+        self.assertAlmostEqual(plain["ending_equity"], marked["ending_equity"])
+        self.assertAlmostEqual(plain["cagr_pct"], marked["cagr_pct"])
+
+    def test_prices_after_the_mark_date_are_never_used(self):
+        # A valuation that peeked forward would rate the position at $10
+        # in March and report no drawdown — lookahead wearing the costume
+        # of a fix.
+        acct = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=5000.0, bars_by_symbol=self.BARS)
+        self.assertLess(acct["worst_drawdown"], -500.0)
+
+    def test_a_symbol_with_no_prices_does_not_crash_the_valuation(self):
+        acct = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=5000.0, bars_by_symbol={"ZZZ": []})
+        self.assertTrue(acct["marked_to_market"])
+
+    def test_a_deeper_fall_produces_a_deeper_drawdown(self):
+        # Monotonicity: the metric has to respond to severity, not merely
+        # to the existence of a dip.
+        shallow = dict(self.BARS)
+        deep = {"AAA": [{"time": "2020-01-01", "close": 10.0},
+                        {"time": "2020-03-01", "close": 2.0},
+                        {"time": "2020-06-01", "close": 10.0}]}
+        a = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=5000.0, bars_by_symbol=shallow)["worst_drawdown"]
+        b = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=5000.0, bars_by_symbol=deep)["worst_drawdown"]
+        self.assertLess(b, a)
+
+    def test_the_price_lookup_itself_never_looks_forward(self):
+        # Asserted on the helper directly. Going through the account
+        # simulation could not distinguish a one-bar forward shift from
+        # correct behaviour — the drawdown appeared either way, just at a
+        # different mark — so the mutation survived a test of the outcome
+        # and needed a test of the mechanism.
+        index = portfolio_sim._price_index(self.BARS)
+        self.assertEqual(portfolio_sim._price_as_of(index, "AAA", "2020-02-15"), 10.0,
+                         "mid-February must see January's close, not March's")
+        self.assertEqual(portfolio_sim._price_as_of(index, "AAA", "2020-03-01"), 4.0)
+        self.assertEqual(portfolio_sim._price_as_of(index, "AAA", "2020-05-31"), 4.0,
+                         "late May must see March's close, not June's")
+        self.assertIsNone(portfolio_sim._price_as_of(index, "AAA", "2019-12-31"),
+                          "before the series starts there is no price")
+
+    def test_drawdown_percent_is_measured_against_the_peak_not_the_start(self):
+        # An account that compounds and then falls must report the fall
+        # relative to what it had, not to what it started with. Against
+        # starting capital a real 45% fall can print as 113%, which is
+        # impossible without leverage and was briefly reported as fact.
+        trades = [{"ticker": "AAA", "entry_date": "2020-01-01",
+                   "exit_date": "2020-02-01", "entry_price": 10.0,
+                   "return_pct": 400.0, "still_open": 0},
+                  {"ticker": "BBB", "entry_date": "2020-03-01",
+                   "exit_date": "2020-04-01", "entry_price": 10.0,
+                   "return_pct": -50.0, "still_open": 0}]
+        acct = portfolio_sim.simulate_fixed_capital(trades, capital=1000.0, stake=1000.0)
+        self.assertGreaterEqual(acct["worst_drawdown_pct"], -100.0)
+        self.assertLessEqual(acct["worst_drawdown_pct"], 0.0)

@@ -20,6 +20,7 @@ So this module reports two different things and keeps them apart.
 account" is what someone actually running it would have earned, which
 needs a peak-capital figure and a calendar.
 """
+import bisect
 import datetime
 import statistics
 
@@ -224,8 +225,69 @@ def simulate_account(trades, stake=1000.0):
     }
 
 
+def _price_index(bars_by_symbol):
+    """{ticker: (sorted dates, closes)} for as-of lookups.
+
+    Built once. The naive version rescanned a symbol's whole series for
+    every valuation, which on a real run is thousands of marks against
+    thousands of bars and turns a diagnostic into an overnight job.
+    """
+    index = {}
+    for ticker, bars in bars_by_symbol.items():
+        pairs = sorted(((b.get("time") or b.get("date") or "")[:10], b.get("close"))
+                       for b in bars if b.get("close") is not None)
+        if pairs:
+            index[ticker] = ([d for d, _ in pairs], [c for _, c in pairs])
+    return index
+
+
+def _price_as_of(index, ticker, when):
+    """Last close on or before `when`, or None. Never looks forward."""
+    entry = index.get(ticker)
+    if not entry:
+        return None
+    dates, closes = entry
+    pos = bisect.bisect_right(dates, when) - 1
+    return closes[pos] if pos >= 0 else None
+
+
+def _marked_curve(ledger, bars_by_symbol, start, end):
+    """Account equity valued at market, sampled weekly.
+
+    `ledger` is [(date, cash, {ticker: shares})] recorded at every change
+    in the book. Between changes the cash and the holdings are constant,
+    but their *value* is not — which is the entire point. A position
+    carried at cost shows no loss until it closes, so drawdown measured
+    that way only ever sees damage already realised.
+
+    A held symbol with no price on or before a mark contributes nothing.
+    That understates equity, but the alternative is carrying it at cost,
+    which is the bias being removed here.
+    """
+    if not ledger:
+        return []
+    index = _price_index(bars_by_symbol)
+    marks, when = [], start
+    step = datetime.timedelta(days=7)
+    pos = 0
+    cash, holdings = ledger[0][1], ledger[0][2]
+    while when <= end:
+        while pos < len(ledger) and ledger[pos][0] <= when:
+            _, cash, holdings = ledger[pos]
+            pos += 1
+        stamp = when.isoformat()
+        value = 0.0
+        for ticker, shares in holdings.items():
+            price = _price_as_of(index, ticker, stamp)
+            if price:
+                value += shares * price
+        marks.append((when, cash + value))
+        when += step
+    return marks
+
+
 def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
-                            cash_yield_pct=0.0, priority=None):
+                            cash_yield_pct=0.0, priority=None, bars_by_symbol=None):
     """What a real account with a fixed amount of money would have done.
 
     simulate_account() takes every signal and reports the answer against
@@ -262,6 +324,15 @@ def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
         high skip rate means the reported return belongs to a different
         and much more selective strategy than the one that was tested.
         `deployed_vs_start_pct` says how much of the money was at work.
+
+    `bars_by_symbol` turns on mark-to-market. Without it, an open
+    position is carried at what it cost, so an unrealised loss shows
+    nothing until the trade closes and `worst_drawdown` only ever sees
+    realised damage. That makes the drawdown figure optimistic by an
+    unmeasured amount — and drawdown is the whole basis of this
+    strategy's case, so every defensive claim made from the cost-basis
+    version is soft. Supplying bars values open positions at each week's
+    close and reports the fall an account would actually have watched.
     """
     done = _resolved(trades)
     if not done:
@@ -313,6 +384,8 @@ def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
     events.sort(key=lambda e: (e[0], e[1]))
 
     cash = float(capital)
+    held = {}        # ticker -> shares, for mark-to-market
+    ledger = []      # (date, cash, holdings) at every change in the book
     open_count = 0
     peak_open = 0
     taken, skipped = 0, 0
@@ -342,12 +415,22 @@ def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
                 realised += proceeds - stake
                 open_count -= 1
                 curve.append((when, cash + open_count * stake))
+                entry = trade.get("entry_price")
+                if entry and trade["ticker"] in held:
+                    held[trade["ticker"]] -= stake / entry
+                    if held[trade["ticker"]] <= 1e-9:
+                        del held[trade["ticker"]]
+                ledger.append((when, cash, dict(held)))
         elif cash >= stake:
             cash -= stake
             open_count += 1
             peak_open = max(peak_open, open_count)
             trade["_funded"] = True
             taken += 1
+            entry = trade.get("entry_price")
+            if entry:
+                held[trade["ticker"]] = held.get(trade["ticker"], 0.0) + stake / entry
+            ledger.append((when, cash, dict(held)))
         else:
             trade["_funded"] = False
             skipped += 1
@@ -366,13 +449,33 @@ def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
     assert open_count == 0, "a funded position was never closed out"
     ending = cash
 
+    if bars_by_symbol is not None:
+        equity_curve = _marked_curve(ledger, bars_by_symbol, start, end)
+        marked = True
+    else:
+        equity_curve = curve
+        marked = False
+
+    # Two figures, because dividing the dollar fall by *starting* capital
+    # is wrong the moment an account compounds: a book that grew to
+    # $250k and fell to $137k is a 45% drawdown, and reporting it against
+    # the original $100k gives 113%, which reads as an impossibility on
+    # an unleveraged account. The percentage is measured against the
+    # running peak, which is the standard definition and the only one
+    # comparable to an index's own drawdown.
     worst_drawdown = 0.0
+    worst_drawdown_pct = 0.0
     running_peak = float(capital)
-    for _, value in curve:
+    for _, value in equity_curve:
         running_peak = max(running_peak, value)
         worst_drawdown = min(worst_drawdown, value - running_peak)
+        if running_peak > 0:
+            worst_drawdown_pct = min(worst_drawdown_pct,
+                                     (value - running_peak) / running_peak * 100)
 
     return {
+        "marked_to_market": marked,
+        "worst_drawdown_pct": worst_drawdown_pct,
         "start": start.isoformat(),
         "end": end.isoformat(),
         "years": years,

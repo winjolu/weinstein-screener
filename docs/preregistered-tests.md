@@ -2008,3 +2008,174 @@ derive (+11.03%) and the worst-but-one elsewhere. That is the shape of
 noise rather than a finding, but it does say the condition earns its
 place mainly in the two windows it was not mined on — which is the right
 way round, and mildly reassuring about the mining.
+
+### S7 re-run — the fix works, and the short side does not
+
+Worst case is now -14.7% to -15.0% in every arm, against the -15% cap.
+The stop is being honoured; the previous run's -10,444% was the defect
+and nothing else.
+
+| window | floor 7 | floor 6 | floor 5 | SPY |
+|---|---|---|---|---|
+| 2005-2009 | 153 trades, **+2.09%/yr** | 987, +1.51% | 1,545, -1.39% | +0.80% |
+| 2010-2020 | 442, -1.33% | 2,067, -3.10% | 3,238, -4.18% | +13.61% |
+| 2021-2026 | 264, +1.08% | 995, -2.11% | 1,583, -6.64% | +11.78% |
+
+Win rates run 14-23% with mean per trade negative almost everywhere. At
+a 15% win rate the payoff ratio needs to be about 6:1 simply to break
+even, and it isn't close.
+
+**Loosening the floor makes it worse, monotonically, in all three
+windows.** That is the opposite of the long side, where the mined filter
+genuinely selects. Here the stricter floor was accidentally doing the
+only useful work — and its 123-trade sample was what disguised the stop
+defect in the first place.
+
+### The answer to "I want money working in a bear market"
+
+It already is, and not by shorting.
+
+In 2005-2009 the short side's best configuration returned **+2.09%/yr**.
+The plain long checklist returned **+8.06%** in the same window and R20
+returned **+9.69%**, by sitting out 2008 (63 entries against 300+ in
+normal years), collecting the cash yield, and buying the recovery hard
+(570 entries in 2009).
+
+So the honest comparison is not "do shorts make money" but "do shorts
+beat cash plus the recovery", and they lose to it by six points a year
+in the one window built to favour them.
+
+**And this is the optimistic version.** No borrow fee is modelled
+anywhere. Hard-to-borrow names — the ones most attractive to short —
+carry the highest rates, so the cost is largest exactly where the setups
+look best. Add squeeze risk, which this engine cannot represent at all.
+
+**Practical blocker on top of the evidence:** short selling requires a
+margin account. Mine is a cash account, so none of this is
+tradeable as things stand regardless of what it measured.
+
+### Recommendation: stop work on the short side
+
+Three windows, nine configurations, consistently negative before costs
+that would only make it worse, against a long side that handles the same
+market conditions far better. The module stays in the tree with its
+defect fixed and its results recorded, but it should not be developed
+further unless something changes the premise.
+
+If bear-market exposure beyond cash is wanted later, inverse ETFs need
+no margin and no borrow, and would be a fresh question rather than a
+continuation of this one.
+
+---
+
+## Batch 18 — K-nearest neighbour on the mined features. Registered 2026-08-02
+
+For a new signal, retrieve the most similar historical setups and use
+their outcomes. Non-parametric, needs no training, and interpretable in
+a way the checklist is not: "this resembles these twenty, which did X."
+
+### K1 — does neighbour retrieval beat ranking on relative strength alone?
+That is the bar, not "does it beat random". Relative strength is the one
+feature with a monotone gradient in all three windows, so a KNN that
+merely rediscovers it has added complexity and nothing else.
+
+**Guards, because three of these could each fake a result on their own:**
+
+- **Temporal split.** Fit on entries 2009-2015, score on 2016-2020.
+  Features exist only for the derivation window, so this is out of
+  sample in *time* but not in regime. The stronger test needs features
+  mined for the test and holdout windows and is queued separately.
+- **Same-ticker neighbours excluded.** The same stock at adjacent weeks
+  produces near-identical vectors with near-identical outcomes. Without
+  this the model retrieves its own memories and scores brilliantly
+  having learned nothing.
+- **Scaling on fit-set statistics only.** Features span RS around 0-100,
+  turnover in millions, and booleans. Unscaled, distance is whichever
+  column has the largest units.
+- **Tail probability, not mean.** The target is fat-tailed — the top 5%
+  of trades carry 88-144% of profit — so the mean of k neighbours is
+  dominated by whether one happened to be a monster. Predict the share
+  of neighbours exceeding +50% instead, which matches how this strategy
+  actually earns.
+
+**Expectation:** KNN roughly matches RS-only ranking and does not beat
+it. 26 features on 6,151 samples is thin, and today's evidence says one
+feature carries most of the signal. Being wrong here would be more
+interesting than being right.
+
+### On the vector database
+Not needed at this scale and recorded so it is not revisited by default.
+Exact nearest-neighbour search over 6,151 x 26 floats is a 1.3MB array
+and microseconds of numpy. Approximate-nearest-neighbour indexes are a
+*speed* optimisation for millions of vectors under latency pressure;
+here they would trade exactness for nothing.
+
+The scale that would justify one is real but not yet built: features
+mined at every bar across 2,627 symbols of daily history is roughly 14
+million vectors. Revisit then, not before.
+
+---
+
+## M1 result — the drawdown claim was overstated, and in one window reversed
+
+Open positions are now valued at each week's close instead of at cost,
+and the percentage is measured against the running peak rather than
+starting capital. Both were wrong, and both were wrong in the flattering
+direction.
+
+| window | | return | previously reported | **actual** | SPY |
+|---|---|---|---|---|---|
+| 2005-2009 | baseline | +8.22% | -7.1% | **-16.3%** | -54.6% |
+| | R20 | +9.67% | -9.8% | **-26.3%** | -54.6% |
+| 2010-2020 | baseline | +9.04% | -6.6% | **-20.5%** | -31.8% |
+| | R20 | +10.51% | -9.0% | **-24.6%** | -31.8% |
+| 2021-2026 | baseline | +6.37% | -13.0% | **-25.4%** | -23.9% |
+| | R20 | +10.39% | -17.9% | **-32.5%** | -23.9% |
+
+Real drawdowns are **two to three times** what this file has been
+reporting throughout.
+
+### What survives and what does not
+
+**Survives:** the bear-market advantage is real and large. Through
+2005-2009 R20 fell 26.3% against the index's 54.6%, and the plain
+baseline fell 16.3%. That is the result the whole defensive case rested
+on and it holds.
+
+**Weakened:** 2010-2020 is now -24.6% against -31.8%. Better, but not
+dramatically, and nothing like the 3x margin the cost-basis figure
+implied.
+
+**Reversed:** in 2021-2026 R20 fell **-32.5% against the index's
+-23.9%** — worse, while also returning less (+10.39% against +11.78%).
+In the most recent window this strategy was beaten on both axes.
+
+### The claim I made, corrected
+
+I described this as "index-like returns at roughly half the drawdown"
+and as "a different risk profile". On honest measurement it is:
+
+- a large drawdown advantage **in a crash**,
+- a modest one in a long bull market,
+- and **a disadvantage in the most recent five years**.
+
+That is a much narrower claim. The strategy protects capital when the
+market breaks; it does not otherwise ride smoother than the index, and
+recently it rode rougher.
+
+### Two bugs, both flattering, found in one change
+
+1. **Positions carried at cost.** An unrealised loss showed nothing
+   until the trade closed, so drawdown only ever saw damage already
+   realised.
+2. **Percentage against starting capital.** Once an account compounds,
+   dividing a dollar fall by the original stake is meaningless — R20's
+   2010-2020 figure printed as -113%, which is impossible unleveraged
+   and is what exposed the error.
+
+The second was caught only because the first made the numbers large
+enough to look absurd. A -113% drawdown is obviously wrong; a -17% one
+is not, and it had been sitting in this file unchallenged for the whole
+project.
+
+**Everything above this section that cites a drawdown is understated.**
