@@ -315,19 +315,42 @@ def risk_adjusted(equity_curve, cagr_pct, periods_per_year=52.0):
     }
 
 
+# (bars dict, index) pairs. The dict itself is held, not just its id:
+# an id-keyed cache is unsafe because CPython reuses addresses after
+# garbage collection, so a temporary bar dict can inherit the index built
+# for a completely different one — silently valuing positions against
+# another symbol set. A test caught exactly that. Holding a reference
+# prevents the address being reused while the entry lives.
+_PRICE_INDEX_CACHE = []
+_PRICE_INDEX_CACHE_SIZE = 4
+
+
 def _price_index(bars_by_symbol):
     """{ticker: (sorted dates, closes)} for as-of lookups.
 
-    Built once. The naive version rescanned a symbol's whole series for
-    every valuation, which on a real run is thousands of marks against
-    thousands of bars and turns a diagnostic into an overnight job.
+    Cached on the identity of the bar dictionary, because it is built
+    from the whole universe — 5,809 symbols — and every call to
+    simulate_fixed_capital was rebuilding it from scratch. Scoring
+    twenty-five random draws against one arm therefore rebuilt it
+    twenty-five times and turned a two-minute comparison into one that
+    timed out.
+
+    Identity rather than contents: the bar cache is loaded once and
+    passed around unchanged, and hashing several million bars to detect
+    a mutation nobody performs would cost more than it saved.
     """
+    for held, index in _PRICE_INDEX_CACHE:
+        if held is bars_by_symbol:
+            return index
+
     index = {}
     for ticker, bars in bars_by_symbol.items():
         pairs = sorted(((b.get("time") or b.get("date") or "")[:10], b.get("close"))
                        for b in bars if b.get("close") is not None)
         if pairs:
             index[ticker] = ([d for d, _ in pairs], [c for _, c in pairs])
+    _PRICE_INDEX_CACHE.append((bars_by_symbol, index))
+    del _PRICE_INDEX_CACHE[:-_PRICE_INDEX_CACHE_SIZE]
     return index
 
 
