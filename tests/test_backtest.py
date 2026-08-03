@@ -822,3 +822,37 @@ class StallExitTest(unittest.TestCase):
         without = self._flat_trade()
         self.assertEqual(with_param, without)
         self.assertTrue(without["still_open"])
+
+
+class ShortStopSanityTest(unittest.TestCase):
+    """A short's protective stop sits above entry, so an unreasonable one
+    is unbounded rather than merely bad.
+
+    short_conditions measures stop width already, but only to set
+    risk_reward False — one vote of eight, which the 80% scoring ratio
+    outvotes, and which is skipped entirely when no target level exists.
+    That let a backtest enter a $0.03 stock with its stop at a prior
+    resistance of $0.80 and book a 2,573% loss. The cap has to reject the
+    trade, not merely disapprove of it.
+    """
+
+    def test_a_stop_far_above_entry_is_rejected(self):
+        from screener import short_conditions
+        entry = 10.0
+        too_wide = entry * (1 + (short_conditions.MAX_SENSIBLE_STOP_PCT + 5) / 100)
+        self.assertGreater((too_wide - entry) / entry * 100,
+                           short_conditions.MAX_SENSIBLE_STOP_PCT)
+
+    def test_the_pathological_case_is_far_outside_the_cap(self):
+        # The actual trade that exposed this: APLD, entered at $0.03 with
+        # the stop at $0.80. Kept as a regression anchor so the number is
+        # a real one rather than an invented example.
+        from screener import short_conditions
+        stop_pct = (0.8019 - 0.03) / 0.03 * 100
+        self.assertGreater(stop_pct, 2500)
+        self.assertGreater(stop_pct, short_conditions.MAX_SENSIBLE_STOP_PCT)
+
+    def test_a_normal_short_stop_is_within_the_cap(self):
+        from screener import short_conditions
+        stop_pct = (44.0 - 40.0) / 40.0 * 100   # the book's own worked example
+        self.assertLessEqual(stop_pct, short_conditions.MAX_SENSIBLE_STOP_PCT)
