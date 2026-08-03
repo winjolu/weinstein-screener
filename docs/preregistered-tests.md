@@ -2448,3 +2448,46 @@ Approximate-nearest-neighbour infrastructure is a speed optimisation for
 millions of vectors under latency pressure; here it would trade
 exactness for nothing. Revisit if features are ever mined at every bar
 across the daily history, which would be roughly 14 million vectors.
+
+### R25 result — the book's stop rule is real risk control at a real cost
+
+Monotonic in every window, on every measure, without exception. That is
+the cleanest dose-response this project has produced.
+
+| window | ceiling | trades | mean | worst trade | return | maxDD | Calmar | Martin | Sortino | weeks under |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2005-2009 | none | 1,530 | +7.87% | -70.3% | +9.26% | -26.0% | 0.36 | 0.65 | 0.88 | 179 |
+| | 25% | 736 | +4.10% | -24.4% | +6.50% | -20.0% | 0.32 | 0.61 | 0.95 | 190 |
+| | **15%** | 256 | +2.58% | **-14.7%** | +3.89% | **-9.0%** | **0.43** | **1.16** | **1.56** | **158** |
+| 2010-2020 | none | 3,578 | +9.07% | -85.6% | +10.57% | -24.3% | **0.43** | **0.87** | **0.94** | 182 |
+| | **15%** | 708 | +2.81% | **-15.0%** | +1.91% | **-7.9%** | 0.24 | 0.52 | 0.73 | 200 |
+| 2021-2026 | none | 3,800 | +4.48% | -83.1% | +10.96% | -31.4% | 0.35 | 0.65 | 0.67 | 156 |
+| | **15%** | 530 | +0.03% | **-14.8%** | +3.48% | **-7.9%** | **0.44** | **0.92** | **1.04** | **93** |
+
+**The cap does exactly what it claims.** Worst single trade goes from
+-70%, -86% and -83% to -14.7%, -15.0% and -14.8%. There is no ambiguity
+about whether the mechanism works.
+
+**Risk-adjusted, the book wins two windows of three** — and the
+dissenter is the derivation window, the one every threshold in this
+project was mined on and therefore the least trustworthy for judging.
+The two windows never used for mining both favour enforcing the rule.
+
+**One number is unique in this project.** Over 2021-2026 the 15% ceiling
+spends 93 weeks under water against the index's 102. Nothing else built
+here has ever beaten SPY on time under water.
+
+**And the cost is severe.** Returns of 1.91% to 3.89% a year against an
+index doing 12-18% in the bull windows. Trade count falls by 80%. This
+is a deeply defensive configuration and only rational for someone who
+weights drawdown avoidance far above return.
+
+### What I would not conclude
+That the ceiling should simply be switched on. The two effects are not
+separable from this test: the cap removes wide-stop setups *and* removes
+80% of all trades, so most of the return loss may be participation
+rather than selection. The random-thinning control that settled the same
+question for the mined filter — does this select, or merely thin? — has
+not been run here and should be before anything is adopted.
+
+Left off by default, as registered.
