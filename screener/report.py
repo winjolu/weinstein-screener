@@ -13,6 +13,8 @@ can interrogate a scan long after the market data behind it has moved on.
 A report can therefore never surprise me with a different answer than the
 scan gave — if a number looks wrong, the scan is where to look.
 """
+import sqlite3
+import statistics
 import argparse
 import json
 import sys
@@ -323,6 +325,77 @@ def show_actionable(limit=None, min_met=None, include_extended=True):
     return 0
 
 
+def compare_arms(pattern, capital=100000.0, cash_yield_pct=0.0, seeds=3):
+    """Score every stored backtest arm matching a name pattern.
+
+    Written into the tool rather than a scratch script on purpose. The
+    scratch directory was cleared between sessions on 2026-08-03, taking
+    every analysis script and the universe definitions with it — the
+    database copies are what survived. Anything worth running twice
+    belongs here.
+
+    Reports return and drawdown together, always marked to market, and
+    always beside buy-and-hold. Drawdown carried at cost understated
+    every figure this project published for months, and a profit without
+    the index next to it is not a result.
+    """
+    from . import bar_cache, portfolio_sim
+
+    bars = bar_cache.load()
+    index = bars.get("SPY", [])
+    for bar_ in index:
+        bar_.setdefault("date", bar_["time"][:10])
+
+    conn = db._connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        names = [r[0] for r in conn.execute(
+            "SELECT DISTINCT parameter_set FROM backtest_trades "
+            "WHERE parameter_set LIKE ? ORDER BY 1", (pattern,))]
+        rows = []
+        for name in names:
+            trades = [dict(r) for r in conn.execute(
+                "SELECT * FROM backtest_trades WHERE parameter_set = ?", (name,))]
+            summary = portfolio_sim.summarise_trades(trades)
+            if not summary:
+                continue
+            accounts = [portfolio_sim.simulate_fixed_capital(
+                trades, capital=capital, stake=1000.0, seed=s,
+                cash_yield_pct=cash_yield_pct, bars_by_symbol=bars)
+                for s in range(seeds)]
+            rows.append({
+                "arm": name,
+                "trades": summary["n"],
+                "win_rate": summary["win_rate"],
+                "mean_pct": summary["mean_pct"],
+                "worst_pct": summary["worst_pct"],
+                "cagr_pct": statistics.mean(a["cagr_pct"] for a in accounts),
+                "drawdown_pct": statistics.mean(a["worst_drawdown_pct"] for a in accounts),
+                "start": accounts[0]["start"],
+                "end": accounts[0]["end"],
+            })
+    finally:
+        conn.close()
+
+    if not rows:
+        print(f"no arms matching {pattern!r}")
+        return []
+
+    span = (min(r["start"] for r in rows), max(r["end"] for r in rows))
+    benchmark = portfolio_sim.benchmark_buy_and_hold(index, *span) if index else None
+
+    print(f"{'arm':<34}{'trades':>8}{'win':>7}{'mean':>9}{'worst':>9}"
+          f"{'return':>10}{'drawdown':>11}")
+    for row in sorted(rows, key=lambda r: -r["cagr_pct"]):
+        print(f"{row['arm']:<34}{row['trades']:>8}{row['win_rate']:>6.1f}%"
+              f"{row['mean_pct']:>+8.2f}%{row['worst_pct']:>+8.1f}%"
+              f"{row['cagr_pct']:>+9.2f}%{row['drawdown_pct']:>10.1f}%")
+    if benchmark:
+        print(f"{'buy and hold SPY':<34}{'':>8}{'':>7}{'':>9}{'':>9}"
+              f"{benchmark['cagr_pct']:>+9.2f}%")
+    return rows
+
+
 def _parse_args(argv=None):
     p = argparse.ArgumentParser(
         prog="report",
@@ -333,6 +406,8 @@ def _parse_args(argv=None):
     g.add_argument("--diff", action="store_true", help="what changed between two scans")
     g.add_argument("--actionable", action="store_true", help="the current shortlist by sector")
     g.add_argument("--runs", action="store_true", help="list stored scan dates")
+    g.add_argument("--arms", metavar="PATTERN",
+                   help="score stored backtest arms, e.g. 'b19_%%'")
 
     p.add_argument("--json", action="store_true", help="with --ticker, dump the raw detail")
     p.add_argument("--from", dest="from_date", metavar="DATE", help="with --diff, earlier scan")
@@ -341,6 +416,8 @@ def _parse_args(argv=None):
     p.add_argument("--min-met", type=int, metavar="N",
                    help="with --actionable, show names meeting N+ conditions "
                         "rather than only those passing the full bar")
+    p.add_argument("--cash-yield", type=float, default=0.0, metavar="PCT",
+                   help="with --arms, annual rate paid on idle cash")
     p.add_argument("--exclude-extended", action="store_true",
                    help="with --actionable, drop names already past the entry zone")
     return p.parse_args(argv)
@@ -359,6 +436,8 @@ def main(argv=None):
             print(f"  {d}   {n:>5} names")
         print()
         return 0
+    if args.arms:
+        return 0 if compare_arms(args.arms, cash_yield_pct=args.cash_yield) else 1
     if args.ticker:
         return show_ticker(args.ticker, as_json=args.json)
     if args.diff:

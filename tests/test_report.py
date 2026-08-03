@@ -205,3 +205,30 @@ class ActionableTest(_TempDB):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompareArmsTest(unittest.TestCase):
+    """Scoring stored backtest arms.
+
+    In the tool rather than a scratch script because the scratch
+    directory was cleared between sessions on 2026-08-03, taking every
+    analysis script with it. Anything worth running twice belongs in the
+    repository.
+    """
+
+    def test_the_arms_flag_is_accepted(self):
+        args = report._parse_args(["--arms", "b19_%"])
+        self.assertEqual(args.arms, "b19_%")
+
+    def test_a_cash_yield_can_be_supplied(self):
+        args = report._parse_args(["--arms", "b19_%", "--cash-yield", "4.0"])
+        self.assertAlmostEqual(args.cash_yield, 4.0)
+
+    def test_cash_yield_defaults_to_zero(self):
+        # The conservative reading has to be the default, so an assist
+        # is always an explicit choice.
+        self.assertEqual(report._parse_args(["--arms", "x"]).cash_yield, 0.0)
+
+    def test_arms_is_mutually_exclusive_with_the_other_modes(self):
+        with self.assertRaises(SystemExit):
+            report._parse_args(["--arms", "x", "--runs"])
