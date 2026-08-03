@@ -9,3 +9,4 @@ reference/
 conf/
 *.log*
 CLAUDE.md
+config/portfolio.json
