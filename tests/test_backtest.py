@@ -856,3 +856,34 @@ class ShortStopSanityTest(unittest.TestCase):
         from screener import short_conditions
         stop_pct = (44.0 - 40.0) / 40.0 * 100   # the book's own worked example
         self.assertLessEqual(stop_pct, short_conditions.MAX_SENSIBLE_STOP_PCT)
+
+
+class LongStopCeilingTest(unittest.TestCase):
+    """The book's 15% ceiling, enforced rather than merely measured.
+
+    conditions.py computes `stop_too_wide` but only uses it to fail
+    risk_reward — one condition of nine, outvoted by the 80% scoring
+    ratio, and disabled outright in R20. The engine consequently traded
+    a median stop 36% below entry, with 22.8% of R20's trades losing
+    more than 15% and the worst losing 83%.
+    """
+
+    def test_the_gate_is_off_by_default(self):
+        # Nothing already recorded may change silently.
+        import inspect
+        sig = inspect.signature(backtest.run_backtest)
+        self.assertIsNone(sig.parameters["max_stop_pct"].default)
+
+    def test_a_stop_inside_the_ceiling_is_arithmetically_accepted(self):
+        entry, stop = 80.0, 70.0
+        self.assertLessEqual((entry - stop) / entry * 100, 15.0)
+
+    def test_the_case_winston_flagged_is_outside_it(self):
+        # An $80 entry with a $30 stop risks 62.5% on one position.
+        entry, stop = 80.0, 30.0
+        self.assertAlmostEqual((entry - stop) / entry * 100, 62.5)
+        self.assertGreater((entry - stop) / entry * 100, 15.0)
+
+    def test_the_ceiling_matches_the_book_not_an_operational_choice(self):
+        from screener import conditions
+        self.assertEqual(conditions.MAX_SENSIBLE_STOP_PCT, 15.0)

@@ -330,6 +330,7 @@ def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, paramete
                   fetch_sector=True, entry_at="signal",
                   take_profit_above_ma_pct=None,
                   stall_exit_weeks=None, stall_exit_min_gain_pct=0.0,
+                  max_stop_pct=None,
                   **condition_overrides):
     """Steps through start_date to end_date at check_interval_weeks
     intervals. At each checkpoint, evaluates each ticker as of that date
@@ -453,6 +454,18 @@ def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, paramete
 
             entry_price = bars_full[entry_idx]["close"]
             entry_date = bars_full[entry_idx]["time"][:10]
+
+            if max_stop_pct is not None and result["swing_stop"] is not None:
+                stop_pct = (entry_price - result["swing_stop"]) / entry_price * 100
+                if stop_pct > max_stop_pct:
+                    # A hard rejection, mirroring the short side. conditions.py
+                    # already measures this and sets `stop_too_wide`, but that
+                    # only drives risk_reward to False — one vote of nine, which
+                    # the 80% ratio outvotes — and R20 disables risk_reward
+                    # entirely, removing the signal altogether. The result was a
+                    # median stop 36% below entry and 22.8% of trades losing more
+                    # than the book's 15% ceiling.
+                    continue
 
             trade = simulate_trade(
                 ticker, entry_date, entry_price, result["swing_stop"], result["swing_target"],

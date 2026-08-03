@@ -2228,3 +2228,58 @@ community banks in this universe can run 1-2%, where it loses three to
 five. That argues for a liquidity floor in the universe filter — which
 is not currently registered and should be, because the alternative is a
 strategy whose returns depend on names it cannot actually trade cheaply.
+
+---
+
+## Batch 19 — R25, the long side's stop ceiling. Registered 2026-08-03
+
+The short-side stop defect has a twin on the long side, and I fixed one
+without checking the other.
+
+`MAX_SENSIBLE_STOP_PCT = 15` is the book's own number, not an
+operational choice — recorded as such after the source was re-read.
+`conditions.py` measures it and sets `stop_too_wide`. But that only
+drives `risk_reward` to False: one condition of nine, which the 80%
+scoring ratio outvotes.
+
+**And R20 disables `risk_reward` outright**, so in the best rule this
+project has, the stop-width check is not weakened — it is absent.
+
+Measured consequences on the test window:
+
+| | R20 | baseline |
+|---|---|---|
+| median implied stop distance | 36.1% | — |
+| 90th percentile | 62.7% | — |
+| trades losing more than 15% | **22.8%** | 10.9% |
+| trades losing more than 30% | 4.9% | 1.9% |
+| worst single loss | -83.1% | -71.7% |
+
+R20 doubled the rate of oversized losses against the baseline, and it
+did so as a side effect of dropping a condition that measured nothing
+useful *as a condition* while carrying the only stop-width signal.
+
+This is also exactly the objection I raised on 2026-08-02 — that
+an $80 entry should never carry a $30 stop — which I answered by
+confirming the constant was the book's and never checked whether the
+engine honoured it.
+
+### R25 — enforce the ceiling as a gate `[book]` `[defect]`
+`run_backtest(max_stop_pct=...)` rejects any setup whose stop sits more
+than that far below entry. A hard rejection, mirroring the short-side
+fix. Default stays None so nothing already recorded changes.
+
+Arms at 15% (the book), 20% and 25% (to see the shape), plus R20
+unchanged as a control run last.
+
+**Expectation, and it is not optimistic.** Trade count should fall
+sharply — the median stop is 36%, so a 15% ceiling may remove most
+setups. Drawdown should improve. **Return may well get worse**, because
+this strategy's profit is concentrated in a fat right tail and wide
+stops are what let winners survive early volatility. If return collapses
+while drawdown improves, that is a real trade-off to present, not a
+failure.
+
+The wrong reading would be to treat a return drop as proof the ceiling
+is bad. Losing 83% on a single position is not a risk profile anyone
+chose; it is one nobody checked for.
