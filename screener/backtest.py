@@ -325,12 +325,36 @@ def _lookback_weeks_needed(start_date):
     return weeks_since_start + LOOKBACK_BUFFER_WEEKS
 
 
+def trend_rule(bars, index_bars=None, ma_weeks=30, momentum_weeks=52):
+    """Time-series momentum: hold while the trend is up, in two lines.
+
+    Price above its 30-week average and a positive 12-month return. That
+    is the mechanical form of what stage analysis does by eye, and it is
+    the most-replicated effect in the trend-following literature.
+
+    It exists here to be run head to head against the nine-condition
+    checklist. If two lines match nine hand-tuned conditions, most of
+    this project's machinery is decoration — which would be worth
+    knowing and is not a bad outcome.
+
+    Reads only the bars it is given, so a caller that truncates to an
+    as-of date gets a point-in-time answer with no further care needed.
+    """
+    if len(bars) < max(ma_weeks, momentum_weeks) + 1:
+        return False
+    closes = [b["close"] for b in bars]
+    average = sum(closes[-ma_weeks:]) / ma_weeks
+    if closes[-1] <= average:
+        return False
+    return closes[-1] > closes[-(momentum_weeks + 1)]
+
+
 def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, parameter_set="baseline",
                   trailing_method='ma', max_hold_weeks=52, bars_by_symbol=None,
                   fetch_sector=True, entry_at="signal",
                   take_profit_above_ma_pct=None,
                   stall_exit_weeks=None, stall_exit_min_gain_pct=0.0,
-                  max_stop_pct=None,
+                  max_stop_pct=None, entry_rule=None,
                   **condition_overrides):
     """Steps through start_date to end_date at check_interval_weeks
     intervals. At each checkpoint, evaluates each ticker as of that date
@@ -430,6 +454,26 @@ def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, paramete
             except Exception as exc:
                 print(f"[{ticker}] {as_of_date} evaluate_as_of failed — {exc}")
                 continue
+
+            if entry_rule is not None:
+                # The checklist is replaced wholesale rather than added
+                # to, which is the point of the comparison. The stop
+                # becomes the 30-week average — trend following's own
+                # stop, and well defined whenever the rule fires, unlike
+                # a swing low that needs a breakout structure this rule
+                # never looks for.
+                bars_so_far = _truncate_bars(bars_full, as_of_date)
+                index_so_far = _truncate_bars(index_bars_full, as_of_date)
+                if not entry_rule(bars_so_far, index_so_far):
+                    continue
+                here = _bar_index_on_or_before(bars_full, as_of_date)
+                if here is None:
+                    continue
+                result = dict(result)
+                result["actionable"] = True
+                result["breakout_idx"] = here
+                result["swing_stop"] = _ma_at(bars_so_far, 30)
+                result["swing_target"] = None
 
             if not result["actionable"]:
                 continue

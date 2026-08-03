@@ -887,3 +887,62 @@ class LongStopCeilingTest(unittest.TestCase):
     def test_the_ceiling_matches_the_book_not_an_operational_choice(self):
         from screener import conditions
         self.assertEqual(conditions.MAX_SENSIBLE_STOP_PCT, 15.0)
+
+
+class TrendRuleTest(unittest.TestCase):
+    """Time-series momentum in two lines, to be run against nine
+    hand-tuned conditions."""
+
+    def _bars(self, closes):
+        return [bar(d, c * 1.02, c * 0.98, c)
+                for d, c in zip(weekly_dates(len(closes)), closes)]
+
+    def test_a_rising_series_qualifies(self):
+        self.assertTrue(backtest.trend_rule(self._bars([50.0 + i for i in range(60)])))
+
+    def test_a_falling_series_does_not(self):
+        self.assertFalse(backtest.trend_rule(self._bars([200.0 - i for i in range(60)])))
+
+    def test_the_moving_average_leg_binds_on_its_own(self):
+        # Up strongly over twelve months, then a crash that puts price
+        # below its 30-week average. Momentum PASSES here, so only the
+        # average leg can reject it.
+        #
+        # My first fixture failed both legs at once, which meant deleting
+        # either one changed nothing and the mutation survived. A test of
+        # an AND has to isolate each side.
+        closes = [50.0 + i * 3 for i in range(45)] + [
+            180.0, 170.0, 160.0, 150.0, 140.0, 130.0, 120.0, 110.0,
+            100.0, 95.0, 90.0, 88.0, 86.0, 84.0, 82.0]
+        bars = self._bars(closes)
+        self.assertGreater(closes[-1], closes[-53], "momentum must pass for this to isolate")
+        self.assertFalse(backtest.trend_rule(bars))
+
+    def test_the_momentum_leg_binds_on_its_own(self):
+        # Down over twelve months, then a rally back above the 30-week
+        # average. The average leg PASSES, so only momentum can reject.
+        closes = [200.0 - i * 2.5 for i in range(45)] + [
+            92.0, 95.0, 98.0, 101.0, 104.0, 107.0, 110.0, 113.0,
+            116.0, 119.0, 122.0, 125.0, 128.0, 131.0, 134.0]
+        bars = self._bars(closes)
+        average = sum(closes[-30:]) / 30
+        self.assertGreater(closes[-1], average, "the average leg must pass for this to isolate")
+        self.assertFalse(backtest.trend_rule(bars))
+
+    def test_momentum_is_measured_over_a_year_not_against_last_week(self):
+        # Rising for a year with a one-week dip at the end. Comparing
+        # against the previous bar rejects this; comparing against a year
+        # ago accepts it, which is what time-series momentum means.
+        closes = [50.0 + i for i in range(59)] + [107.0]
+        self.assertLess(closes[-1], closes[-2])
+        self.assertTrue(backtest.trend_rule(self._bars(closes)))
+
+    def test_too_little_history_is_a_refusal_not_a_guess(self):
+        self.assertFalse(backtest.trend_rule(self._bars([50.0 + i for i in range(20)])))
+
+    def test_the_rule_reads_only_the_bars_it_is_given(self):
+        # The point-in-time property, asserted the strong way: the answer
+        # on a truncated series must equal the answer on the full one.
+        full = self._bars([50.0 + i for i in range(80)])
+        early = full[:60]
+        self.assertEqual(backtest.trend_rule(early), backtest.trend_rule(full[:60]))
