@@ -286,8 +286,47 @@ def _marked_curve(ledger, bars_by_symbol, start, end):
     return marks
 
 
+def implied_stop_pct(trade):
+    """How far below entry this trade's stop sat, as a percentage.
+
+    Not stored on the trade, but recoverable: r_multiple is the gain
+    divided by the risk, and return_pct is the gain over entry, so their
+    ratio is the risk over entry. Derived rather than added as a column
+    because backtest_trades holds real history and a schema change would
+    need a migration.
+    """
+    r = trade.get("r_multiple")
+    ret = trade.get("return_pct")
+    if not r or ret is None:
+        return None
+    pct = abs(ret / r)
+    return pct if 0 < pct < 100 else None
+
+
+def _stake_for(trade, capital, base_stake, risk_pct, max_stake):
+    """Position size for one trade.
+
+    With `risk_pct` set, size so that being stopped out costs the same
+    fraction of the account every time: a stop 5% away gets three times
+    the position of one 15% away, because the loss if wrong is what is
+    being held constant, not the dollars committed.
+
+    Falls back to the flat stake when the stop distance is unknown. That
+    is the conservative direction — an unknown risk does not get an
+    outsized position.
+    """
+    if risk_pct is None:
+        return base_stake
+    stop_pct = implied_stop_pct(trade)
+    if stop_pct is None:
+        return base_stake
+    stake = (capital * risk_pct / 100.0) / (stop_pct / 100.0)
+    return max(min(stake, max_stake), 0.0)
+
+
 def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
-                            cash_yield_pct=0.0, priority=None, bars_by_symbol=None):
+                            cash_yield_pct=0.0, priority=None, bars_by_symbol=None,
+                            risk_pct=None, max_stake=None):
     """What a real account with a fixed amount of money would have done.
 
     simulate_account() takes every signal and reports the answer against
@@ -383,6 +422,8 @@ def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
               + [(_date(t["entry_date"]), 1, "entry", t) for t in by_entry])
     events.sort(key=lambda e: (e[0], e[1]))
 
+    if max_stake is None:
+        max_stake = capital * 0.10   # no single position over a tenth of the book
     cash = float(capital)
     held = {}        # ticker -> shares, for mark-to-market
     ledger = []      # (date, cash, holdings) at every change in the book
@@ -410,33 +451,38 @@ def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
 
         if kind == "exit":
             if trade.get("_funded"):
-                proceeds = stake * (1 + trade["return_pct"] / 100.0)
+                committed = trade.get("_stake", stake)
+                proceeds = committed * (1 + trade["return_pct"] / 100.0)
                 cash += proceeds
-                realised += proceeds - stake
+                realised += proceeds - committed
                 open_count -= 1
-                curve.append((when, cash + open_count * stake))
+                curve.append((when, cash + open_count * committed))
                 entry = trade.get("entry_price")
                 if entry and trade["ticker"] in held:
-                    held[trade["ticker"]] -= stake / entry
+                    held[trade["ticker"]] -= committed / entry
                     if held[trade["ticker"]] <= 1e-9:
                         del held[trade["ticker"]]
                 ledger.append((when, cash, dict(held)))
-        elif cash >= stake:
-            cash -= stake
+        else:
+            want = _stake_for(trade, capital, stake, risk_pct, max_stake)
+            if want <= 0 or cash < want:
+                trade["_funded"] = False
+                skipped += 1
+                continue
+            trade["_stake"] = want
+            cash -= want
             open_count += 1
             peak_open = max(peak_open, open_count)
             trade["_funded"] = True
             taken += 1
             entry = trade.get("entry_price")
             if entry:
-                held[trade["ticker"]] = held.get(trade["ticker"], 0.0) + stake / entry
+                held[trade["ticker"]] = held.get(trade["ticker"], 0.0) + want / entry
             ledger.append((when, cash, dict(held)))
-        else:
-            trade["_funded"] = False
-            skipped += 1
 
     for trade in done:
         trade.pop("_funded", None)
+        trade.pop("_stake", None)
 
     start = min(_date(t["entry_date"]) for t in done)
     end = max(_date(t["exit_date"]) for t in done)

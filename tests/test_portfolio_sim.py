@@ -644,3 +644,104 @@ class MarkToMarketTest(unittest.TestCase):
         acct = portfolio_sim.simulate_fixed_capital(trades, capital=1000.0, stake=1000.0)
         self.assertGreaterEqual(acct["worst_drawdown_pct"], -100.0)
         self.assertLessEqual(acct["worst_drawdown_pct"], 0.0)
+
+
+class RiskBasedSizingTest(unittest.TestCase):
+    """Position size set by risk, not by a flat dollar amount.
+
+    A flat $1,000 into a trade stopping out at 5% risks $50; the same
+    $1,000 into one stopping at 15% risks $150. The account was betting
+    three times as much on the second without anyone choosing that.
+    Sizing by risk holds the loss-if-wrong constant instead.
+    """
+
+    def _trade(self, ticker, ret, r_multiple, entry="2020-01-01", exit_="2020-06-01"):
+        return {"ticker": ticker, "entry_date": entry, "exit_date": exit_,
+                "entry_price": 100.0, "return_pct": ret, "r_multiple": r_multiple,
+                "still_open": 0}
+
+    def test_implied_stop_is_recovered_from_the_r_multiple(self):
+        # +20% at 2R means the risk was 10% of entry.
+        self.assertAlmostEqual(
+            portfolio_sim.implied_stop_pct(self._trade("A", 20.0, 2.0)), 10.0)
+
+    def test_a_missing_r_multiple_gives_no_stop_distance(self):
+        self.assertIsNone(portfolio_sim.implied_stop_pct(self._trade("A", 20.0, None)))
+        self.assertIsNone(portfolio_sim.implied_stop_pct(self._trade("A", 20.0, 0.0)))
+
+    def test_a_tighter_stop_earns_a_larger_position(self):
+        # Same account, same risk budget: a 5% stop should take roughly
+        # three times the position of a 15% stop.
+        tight = portfolio_sim._stake_for(self._trade("A", 10.0, 2.0),   # 5% stop
+                                         100000.0, 1000.0, 1.0, 1e9)
+        wide = portfolio_sim._stake_for(self._trade("B", 15.0, 1.0),    # 15% stop
+                                        100000.0, 1000.0, 1.0, 1e9)
+        self.assertAlmostEqual(tight / wide, 3.0, places=6)
+
+    def test_the_risk_budget_is_what_is_held_constant(self):
+        # 1% of $100,000 is $1,000 of risk. A 5% stop therefore buys
+        # $20,000 of stock, because 5% of $20,000 is $1,000.
+        stake = portfolio_sim._stake_for(self._trade("A", 10.0, 2.0),
+                                         100000.0, 1000.0, 1.0, 1e9)
+        self.assertAlmostEqual(stake, 20000.0, places=6)
+
+    def test_no_single_position_exceeds_the_cap(self):
+        # A very tight stop would otherwise demand an absurd position.
+        stake = portfolio_sim._stake_for(self._trade("A", 100.0, 200.0),
+                                         100000.0, 1000.0, 1.0, 10000.0)
+        self.assertLessEqual(stake, 10000.0)
+
+    def test_an_unknown_stop_falls_back_to_the_flat_stake(self):
+        # The conservative direction: unknown risk must not be rewarded
+        # with an outsized position.
+        stake = portfolio_sim._stake_for(self._trade("A", 10.0, None),
+                                         100000.0, 1000.0, 1.0, 1e9)
+        self.assertEqual(stake, 1000.0)
+
+    def test_sizing_off_reproduces_the_flat_stake_result(self):
+        trades = [self._trade("A", 10.0, 2.0), self._trade("B", -5.0, -1.0)]
+        flat = portfolio_sim.simulate_fixed_capital(trades, capital=50000.0)
+        self.assertAlmostEqual(flat["ending_equity"], 50000.0 + 100.0 - 50.0, places=6)
+
+    def test_sizing_on_changes_the_outcome(self):
+        # If risk_pct were ignored, both runs would be identical — the
+        # failure mode that made an earlier experiment run its control
+        # twice and report a real change as inert.
+        trades = [self._trade("A", 10.0, 2.0), self._trade("B", -5.0, -1.0)]
+        flat = portfolio_sim.simulate_fixed_capital(trades, capital=50000.0)
+        risked = portfolio_sim.simulate_fixed_capital(
+            trades, capital=50000.0, risk_pct=1.0)
+        self.assertNotAlmostEqual(flat["ending_equity"], risked["ending_equity"])
+
+    def test_the_committed_stake_is_what_gets_returned_at_exit(self):
+        # Exiting on the flat stake while having funded a larger one
+        # would manufacture or destroy money silently.
+        #
+        # The return has to be non-zero: a 0% trade makes the implied
+        # stop undefined, so sizing falls back to the flat stake and the
+        # test exercises nothing. My first version did exactly that and
+        # let two mutations through.
+        #
+        # +10% at 2R is a 5% stop. Risking 1% of $100,000 wants $20,000,
+        # capped at a tenth of the book, so $10,000 goes in and $11,000
+        # comes back.
+        trades = [self._trade("A", 10.0, 2.0)]
+        acct = portfolio_sim.simulate_fixed_capital(
+            trades, capital=100000.0, risk_pct=1.0)
+        self.assertAlmostEqual(acct["ending_equity"], 101000.0, places=2)
+
+    def test_the_stop_distance_is_a_magnitude_not_a_signed_number(self):
+        # A losing trade carries a negative return and a negative
+        # r_multiple, so the ratio comes out positive on its own. The
+        # guard matters when the two disagree in sign, which would
+        # otherwise yield a negative "distance" and an absurd position.
+        self.assertAlmostEqual(
+            portfolio_sim.implied_stop_pct(self._trade("A", -10.0, 2.0)), 5.0)
+        self.assertAlmostEqual(
+            portfolio_sim.implied_stop_pct(self._trade("A", 10.0, -2.0)), 5.0)
+
+    def test_bookkeeping_is_cleaned_off_the_caller_s_trades(self):
+        trades = [self._trade("A", 10.0, 2.0)]
+        portfolio_sim.simulate_fixed_capital(trades, capital=50000.0, risk_pct=1.0)
+        self.assertNotIn("_stake", trades[0])
+        self.assertNotIn("_funded", trades[0])

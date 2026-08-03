@@ -2283,3 +2283,52 @@ failure.
 The wrong reading would be to treat a return drop as proof the ceiling
 is bad. Losing 83% on a single position is not a risk profile anyone
 chose; it is one nobody checked for.
+
+---
+
+## M2 result — risk-based sizing is a feature, not an improvement
+
+Position size set so that being stopped out costs the same fraction of
+the account each time, rather than committing a flat dollar amount
+regardless of how far away the stop sits. Stop distance is recovered
+from `r_multiple` (gain over risk) and `return_pct` (gain over entry),
+whose ratio is risk over entry — no schema change needed.
+
+$100,000 account, marked to market, no single position over a tenth of
+the book.
+
+| window | flat $1,000 | risk 0.5% | risk 1.0% | SPY |
+|---|---|---|---|---|
+| 2005-2009 | +9.67% / -26.3% | **+11.35%** / -27.6% | +9.19% / -29.0% | +0.80% |
+| 2010-2020 | +10.51% / -24.6% | +11.70% / -24.3% | **+13.32%** / -28.8% | +13.61% |
+| 2021-2026 | **+10.39%** / -32.5% | +8.67% / -38.9% | +10.05% / **-46.6%** | +11.78% |
+
+**Not an improvement.** Returns rise in two windows and fall in the
+third, while drawdown worsens in five of six comparisons — severely in
+the most recent window, where 1% risk per trade produces a 46.6% fall
+against the index's 23.9%.
+
+The mechanism is straightforward once seen: sizing by risk puts far more
+money into tight-stop setups, and with the cap at a tenth of the book
+many positions sit at that cap. The result is a more concentrated
+portfolio, which raises returns and drawdowns together. That is a
+different risk profile, not a better one.
+
+The test window is also **non-monotonic** — 0.5% risk does worse than
+both flat sizing and 1% risk — which is the signature of noise rather
+than a dose-response relationship.
+
+### Why it stays in anyway
+What I want out of this needs "what share of the stake goes into each",
+so per-position sizing is a required output regardless of whether it
+improves a backtest. What this result changes is the claim attached to
+it: the feature ships as *a way to size positions*, not as a way to make
+more money, and the flat stake remains the default because nothing here
+justifies displacing it.
+
+**The obvious next move is the one to avoid.** A smaller position cap
+would probably tame the drawdowns and might turn this into a clean win.
+Tuning the cap until the answer looks good, on windows I have already
+read, is exactly how the mined thresholds got their credibility problem.
+If this is worth pursuing it needs registering as its own test with the
+cap swept in both directions.
