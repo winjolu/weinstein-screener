@@ -15,6 +15,71 @@ whereas a list of intentions needs pruning to stay honest.
 
 ## [Unreleased]
 
+### Added
+- A portfolio layer, which is what turns this from a screener into
+  something usable while holding positions. `screener/portfolio.py`
+  tracks holdings and cost basis, maintains trailing stops that ratchet
+  up only, and detects a stop being touched on the bar's *low* rather
+  than its close — a stop is an order resting in the market and fills
+  when price trades through it, not when the week happens to close
+  below. Real holdings live in a gitignored `config/portfolio.json`;
+  only the example is committed.
+- A recommendation log, which is the first forward evidence this project
+  has ever produced. Everything else recorded here is a backtest over
+  history I have already read, on an engine whose defects keep
+  surfacing; a row written before the outcome is known cannot be tuned
+  afterwards. Suggestions declined are kept alongside those taken, and
+  the outcome field stores text rather than a boolean so "bought half"
+  and "waited a week" survive as themselves.
+- `screener/daily_review.py`, the once-a-day check. Stops on weekdays,
+  purchases only once the weekly bar has closed — a breakout read on a
+  Wednesday sits on a bar with two days left to change its mind. Every
+  suggestion commits to a share count, a price and a stop, because
+  output that can't be checked against a chart can't be argued with or
+  scored later.
+- A broker-agnostic cost model. `screener/costs.py` carries commission
+  per trade, per share and percentage, minimums, caps, regulatory
+  pass-throughs and a borrow rate, with Webull as one profile among
+  several rather than the assumption.
+- Mark-to-market equity, risk-based position sizing, and a two-line
+  time-series-momentum rule to run head to head against the nine-condition
+  checklist.
+- EDGAR identity resolution for all 5,803 cached symbols, plus every
+  delisting notice filed with the SEC since 2004 — 36,346 of them across
+  11,448 companies.
+- Full daily bar history: 2,628 symbols, 9.9M bars back to 2005. Webull's
+  1200-bar cap turned out to be per *request*, not a limit on depth; the
+  `end_time` parameter pages backwards and reaches 1993.
+
+### Fixed
+- Every drawdown figure this project had reported was understated, some
+  by three times. Open positions were carried at cost, so an unrealised
+  loss showed nothing until the trade closed. A second bug sat behind
+  it: the percentage was divided by *starting* capital, so a compounding
+  account produced impossible readings — one printed as -113%, which is
+  what finally exposed it. The corrected claim is narrower than the one
+  I had been making: a large drawdown advantage in a crash, a modest one
+  in a long bull market, and a disadvantage over the last five years.
+- The book's 15% stop ceiling was measured everywhere and enforced
+  nowhere, on both sides of the book. It only ever failed one condition
+  of nine, which the 80% scoring ratio outvotes — and the best-performing
+  rule disables that condition outright. On the short side, where the
+  stop sits above entry and losses are unbounded, this produced trades
+  losing 2,573% and 10,444%: the engine shorted a $0.03 stock with its
+  stop at a prior resistance of $0.80. On the long side it produced a
+  median stop 36% below entry and a worst single loss of -83%.
+- A ticker is not a stable identity. Webull maps a symbol to whoever
+  holds it now, so requesting GM with an end date in 2008 returns bars
+  belonging to a company that no longer exists. EDGAR's CIK is the
+  identifier a ticker isn't.
+
+### Changed
+- Mined signal features, universe definitions and delisting records now
+  live in the database rather than scratch files. This was not
+  housekeeping: the scratch files were deleted between sessions, and
+  every batch script that read them would have failed. The database
+  copies are what kept the work.
+
 ### Fixed
 - A losing arm reported its annual return as a complex number. When
   realised losses exceed the capital base, the CAGR calculation takes a
