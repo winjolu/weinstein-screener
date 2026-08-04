@@ -74,7 +74,12 @@ def _get(table, **params):
     return list(csv.DictReader(io.StringIO(body)))
 
 
-def fetch(table, page_size=MAX_LIMIT, max_rows=None, **params):
+def fetch(_table, page_size=MAX_LIMIT, max_rows=None, **params):
+    # The positional name is underscored because `table` is also a real
+    # column in the tickers response, so callers legitimately want to
+    # filter on it. Without this, fetch("tickers", table="stocks") raises
+    # "got multiple values for argument 'table'" — which is a confusing
+    # error for a correct-looking call.
     """All rows for a query, following offset pagination to the end.
 
     Stops when a page comes back shorter than requested, which is the
@@ -83,7 +88,7 @@ def fetch(table, page_size=MAX_LIMIT, max_rows=None, **params):
     """
     rows, skip = [], 0
     while True:
-        page = _get(table, limit=page_size, skip=skip, **params)
+        page = _get(_table, limit=page_size, skip=skip, **params)
         rows.extend(page)
         if len(page) < page_size:
             return rows

@@ -383,3 +383,40 @@ pass-throughs, minimums, and short borrow, with Webull shipped as one
 profile among several. The breakeven sweep then answers "does this
 survive at *this* broker" rather than at one specific broker, which is
 the more useful question and no harder to build.
+
+## Stretch features — revisit deliberately, not by default
+
+### After-hours gap alert
+Monitor open positions during extended hours and fire a hard alert on a
+severe gap. Sized against 3.4M overnight gaps on liquid names, 2021-2026,
+assuming 25 held positions:
+
+| threshold | alerts per year |
+|---|---|
+| >=5% | 208 — nearly nightly, will be ignored |
+| >=10% | 75 |
+| **>=15%** | **42 — about weekly, the suggested start** |
+| >=20% | 27 |
+
+Median overnight gap is 0.60%, 99th percentile 11.29%, so 15% is
+genuinely unusual.
+
+**Threshold choice is the whole problem; the plumbing is trivial.** An
+alert that fires 208 times a year is one you learn to dismiss, which is
+worse than none because it creates false confidence.
+
+Delivery, in order of whether you would actually notice: phone push
+(ntfy.sh is free, one HTTP POST), macOS notification with sound, terminal
+output (useless). Something has to be awake at 6pm for any of it.
+
+**Frame it as information, not an execution trigger.** Extended-hours
+spreads run 1-5%, and our edge sits in the thinnest quartile where there
+is often no after-hours bid at all. Knowing a position gapped is worth
+having. Concluding you must act tonight is how the alert costs more than
+the gap did.
+
+### Modelling after-hours trading in the backtest — decided against
+The whole gap problem is worth 0.16 to 0.28 points per trade. Recovering
+part of it through extended-hours exits, at 1-5% spreads, in names that
+frequently have no bid, is not worth the modelling effort — and Sharadar
+is end-of-day only, so it could not be tested rigorously anyway.

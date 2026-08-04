@@ -2754,3 +2754,83 @@ average capital — was set without any adjustment for the number of looks
 taken. Those criteria are not wrong so much as unadjusted, and the
 adjustment is large. Any future claim from this project should carry a
 t-statistic and the count of arms run to date beside it.
+
+---
+
+## S1 result — the survivorship correction, measured at last
+
+The true 2005 investable universe was 3,957 domestic common stocks with
+at least $1M weekly volume. 2,725 of them (69%) have since delisted. Our
+holdout universe was 1,257, of which only 964 appear in the true set —
+so we were testing on roughly a fifth of the market, drawn entirely from
+survivors, and missing GOOGL, Yahoo, Dell and Broadcom even among the
+companies that lived.
+
+Three universes, so the two defects separate: **A** our survivors, **C**
+the point-in-time universe restricted to names still listed, **B** the
+full point-in-time universe including the dead.
+
+| rule | universe | trades | mean | return | maxDD | Martin | t |
+|---|---|---|---|---|---|---|---|
+| R20 | A survivors | 1,186 | +7.01% | **+8.19%** | -21.7% | 0.74 | 1.58 |
+| | C PIT live | 1,426 | +6.43% | +7.21% | -21.0% | 0.61 | 1.38 |
+| | **B PIT all** | 4,384 | +5.16% | **+4.39%** | -26.8% | **0.30** | 0.83 |
+| M9 | A survivors | 13,334 | +1.08% | +3.39% | -12.1% | 0.53 | 0.98 |
+| | C PIT live | 15,445 | +0.82% | +2.62% | -14.3% | 0.34 | 0.80 |
+| | **B PIT all** | 39,205 | +0.65% | **+4.17%** | -16.3% | 0.47 | 1.21 |
+
+Buy and hold SPY: +0.80%/yr.
+
+### The tuned rule broke; the untuned one held
+
+| | universe incompleteness (C-A) | survivorship (B-C) |
+|---|---|---|
+| R20 | -0.98 pts | **-2.82 pts** |
+| M9 | -0.77 pts | **+1.55 pts** |
+
+**R20 loses 47% of its annual return and 60% of its Martin ratio.** M9
+improves slightly.
+
+The mechanism is legible rather than lucky. R20's mined filter was
+derived by ranking features against realised return across 6,151
+derivation trades — every one of them on a company that still existed in
+2026. The thresholds encode the characteristics of survivors. Confronted
+with the companies that died, the filter degrades badly. M9 is two lines
+from a 2012 paper with nothing fitted to anything, and it barely notices
+the change.
+
+That is an overfitting signature demonstrated on data rather than argued
+from theory, and it is an argument for M9 over R20 independent of every
+performance comparison in this file.
+
+### What survives and what does not
+
+**Survives:** the bear-market claim. Both rules beat buy-and-hold in the
+crash window on an honest universe — +4.39% and +4.17% against +0.80%.
+The margin falls from about 7 points to about 3.5, but the qualitative
+finding holds for the first time on data that includes the bankruptcies.
+
+**Does not:** any claim to statistical significance. Every t-statistic
+is below 2, against the 2.88 that 25 tests require. Best is M9 at 1.21.
+
+**Every result recorded above this section was measured on universe A**
+and should be read as an overstatement of an unknown but now-bounded
+size — roughly a 47% haircut for the mined rules, less for the simple
+ones.
+
+### Two defects found while running it
+
+**Terminal delistings were being discarded.** A position held into a
+delisting has no exit bar, so the engine marked it `still_open` and
+`portfolio_sim` excluded it from scoring. That silently dropped 101 R20
+and 631 M9 trades in arm B. Of the R20 ones, 73 of 88 were gains, median
++16.2%, worst -3.4% — the signature of acquisitions closing at a
+premium. **We were counting the bankruptcies and discarding the
+buyouts**, which made survivorship look worse than it is. Found by asking
+what happens to shares in an acquisition.
+
+**Sixteen trades entered on a company's final trading bar**, giving an
+exit date equal to the entry date and a zero-length position. The
+`open_count == 0` assertion in simulate_fixed_capital caught it — an
+assertion added earlier when removing unreachable code, which has now
+paid for itself.
