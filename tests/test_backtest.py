@@ -946,3 +946,170 @@ class TrendRuleTest(unittest.TestCase):
         full = self._bars([50.0 + i for i in range(80)])
         early = full[:60]
         self.assertEqual(backtest.trend_rule(early), backtest.trend_rule(full[:60]))
+
+
+class GapThroughStopTest(unittest.TestCase):
+    """A stop does not guarantee its own price.
+
+    If a bar opens below the stop, the position is gone at the open and
+    the fill is whatever the market offers there. Booking the stop price
+    anyway invents money — the same error as the retroactive entry fill
+    that was once worth the entire measured edge.
+    """
+
+    def _bars(self, rows):
+        # rows: (open, high, low, close)
+        dates = weekly_dates(len(rows))
+        return [{"time": d + "T00:00:00.000+0000", "open": o, "high": h,
+                 "low": l, "close": c, "volume": 1_000_000}
+                for d, (o, h, l, c) in zip(dates, rows)]
+
+    def test_an_orderly_touch_fills_at_the_stop(self):
+        # Opens above the stop, trades down through it: the stop works.
+        rows = [(100, 101, 99, 100)] * 10 + [(99, 100, 90, 92)]
+        bars = self._bars(rows)
+        trade = backtest.simulate_trade(
+            "T", bars[9]["time"][:10], 100.0, swing_stop=95.0,
+            swing_target=130.0, bars_full=bars)
+        self.assertEqual(trade["exit_reason"], "stop")
+        self.assertAlmostEqual(trade["exit_price"], 95.0)
+
+    def test_a_gap_through_the_stop_fills_at_the_open(self):
+        # Opens at 80, far below the 95 stop. The exit is at 80.
+        rows = [(100, 101, 99, 100)] * 10 + [(80, 82, 78, 79)]
+        bars = self._bars(rows)
+        trade = backtest.simulate_trade(
+            "T", bars[9]["time"][:10], 100.0, swing_stop=95.0,
+            swing_target=130.0, bars_full=bars)
+        self.assertAlmostEqual(trade["exit_price"], 80.0)
+        self.assertLess(trade["return_pct"], -15.0)
+
+    def test_the_gap_makes_the_loss_worse_not_better(self):
+        # The whole point: the corrected fill must never flatter the trade.
+        orderly = self._bars([(100, 101, 99, 100)] * 10 + [(99, 100, 90, 92)])
+        gapped = self._bars([(100, 101, 99, 100)] * 10 + [(80, 82, 78, 79)])
+        a = backtest.simulate_trade("T", orderly[9]["time"][:10], 100.0, 95.0, 130.0, orderly)
+        b = backtest.simulate_trade("T", gapped[9]["time"][:10], 100.0, 95.0, 130.0, gapped)
+        self.assertLess(b["return_pct"], a["return_pct"])
+
+    def test_a_bar_with_no_open_still_exits_at_the_stop(self):
+        # Missing data must not crash the exit path or invent a fill.
+        bars = self._bars([(100, 101, 99, 100)] * 10 + [(99, 100, 90, 92)])
+        bars[10]["open"] = None
+        trade = backtest.simulate_trade(
+            "T", bars[9]["time"][:10], 100.0, 95.0, 130.0, bars)
+        self.assertAlmostEqual(trade["exit_price"], 95.0)
+
+
+class DelistingExitTest(unittest.TestCase):
+    """Running out of bars means two different things.
+
+    The hold cap expiring leaves a genuinely open position. The price
+    series *ending* means the company stopped existing — acquired or
+    delisted — and the shares resolved to cash or to nothing. Treating
+    the second as "still open" discards it from every result, and the
+    discarded population is overwhelmingly acquisitions closing at a
+    premium: 73 of 88 were gains, median +16.2%, worst -3.4%.
+    """
+
+    def _bars(self, closes, start="2019-01-04"):
+        dates = weekly_dates(len(closes), start)
+        return [bar(d, c * 1.02, c * 0.98, c) for d, c in zip(dates, closes)]
+
+    def test_a_series_that_ends_is_a_closed_trade(self):
+        # Rises steadily, never stops out, then the data simply stops.
+        bars = self._bars([100.0 + i for i in range(20)])
+        trade = backtest.simulate_trade(
+            "T", bars[2]["time"][:10], bars[2]["close"],
+            swing_stop=50.0, swing_target=1000.0, bars_full=bars,
+            max_hold_weeks=520, data_end="2026-01-01")
+        self.assertFalse(trade["still_open"])
+        self.assertEqual(trade["exit_reason"], "delisted")
+        self.assertIsNotNone(trade["return_pct"])
+        self.assertGreater(trade["return_pct"], 0)
+
+    def test_the_hold_cap_still_leaves_a_position_open(self):
+        # Data continues past the cap, so the outcome is genuinely unknown.
+        bars = self._bars([100.0 + i * 0.1 for i in range(60)])
+        trade = backtest.simulate_trade(
+            "T", bars[2]["time"][:10], bars[2]["close"],
+            swing_stop=50.0, swing_target=1000.0, bars_full=bars,
+            max_hold_weeks=10)
+        self.assertTrue(trade["still_open"])
+        self.assertEqual(trade["exit_reason"], "still_open")
+        self.assertIsNone(trade["return_pct"])
+
+    def test_an_acquisition_premium_is_not_discarded(self):
+        # The case that was being silently dropped: a takeover closes the
+        # position at a gain and the series stops there.
+        bars = self._bars([100.0] * 8 + [145.0, 146.0])
+        trade = backtest.simulate_trade(
+            "T", bars[1]["time"][:10], 100.0,
+            swing_stop=90.0, swing_target=1000.0, bars_full=bars,
+            max_hold_weeks=520, data_end="2026-01-01")
+        self.assertFalse(trade["still_open"])
+        self.assertGreater(trade["return_pct"], 40.0)
+
+    def test_a_wipeout_that_outruns_the_stop_is_still_counted(self):
+        # The other side: delisted at near zero. Must not be excluded
+        # either, or we would drop the losses and keep only the buyouts.
+        bars = self._bars([100.0] * 8 + [4.0, 0.4])
+        trade = backtest.simulate_trade(
+            "T", bars[1]["time"][:10], 100.0,
+            swing_stop=1.0, swing_target=1000.0, bars_full=bars,
+            max_hold_weeks=520, data_end="2026-01-01")
+        self.assertFalse(trade["still_open"])
+        self.assertLess(trade["return_pct"], -90.0)
+
+    def test_a_live_position_at_the_data_edge_is_not_called_delisted(self):
+        # The bug my first attempt introduced, and the reason data_end
+        # exists. Every currently-listed stock's series ends at the most
+        # recent bar; deciding from the bars alone marks all of them
+        # delisted. Here the series runs right up to data_end, so the
+        # position is genuinely still open.
+        bars = self._bars([100.0 + i for i in range(20)], start="2025-09-05")
+        last = bars[-1]["time"][:10]
+        trade = backtest.simulate_trade(
+            "T", bars[2]["time"][:10], bars[2]["close"],
+            swing_stop=50.0, swing_target=1000.0, bars_full=bars,
+            max_hold_weeks=520, data_end=last)
+        self.assertTrue(trade["still_open"])
+        self.assertIsNone(trade["return_pct"])
+
+    def test_without_data_end_behaviour_is_unchanged(self):
+        # The safe default: no information about where the data stops
+        # means no claim that anything was delisted.
+        bars = self._bars([100.0 + i for i in range(20)])
+        trade = backtest.simulate_trade(
+            "T", bars[2]["time"][:10], bars[2]["close"],
+            swing_stop=50.0, swing_target=1000.0, bars_full=bars,
+            max_hold_weeks=520)
+        self.assertTrue(trade["still_open"])
+
+    def test_a_slightly_stale_final_bar_is_not_a_delisting(self):
+        # Bars routinely lag the nominal data date by a few days — a
+        # weekend, a holiday, a vendor's update schedule. Without slack,
+        # every open position gets marked delisted whenever the cache is
+        # a week behind, which is most of the time.
+        bars = self._bars([100.0 + i for i in range(20)], start="2025-09-05")
+        last = datetime.date.fromisoformat(bars[-1]["time"][:10])
+        data_end = (last + datetime.timedelta(days=8)).isoformat()
+        trade = backtest.simulate_trade(
+            "T", bars[2]["time"][:10], bars[2]["close"],
+            swing_stop=50.0, swing_target=1000.0, bars_full=bars,
+            max_hold_weeks=520, data_end=data_end)
+        self.assertTrue(trade["still_open"],
+                        "an 8-day-old final bar is staleness, not a delisting")
+
+    def test_a_series_ending_months_early_is_a_delisting(self):
+        # The other side of the same boundary: a company that stopped
+        # trading well before the data does.
+        bars = self._bars([100.0 + i for i in range(20)], start="2025-01-03")
+        last = datetime.date.fromisoformat(bars[-1]["time"][:10])
+        data_end = (last + datetime.timedelta(weeks=20)).isoformat()
+        trade = backtest.simulate_trade(
+            "T", bars[2]["time"][:10], bars[2]["close"],
+            swing_stop=50.0, swing_target=1000.0, bars_full=bars,
+            max_hold_weeks=520, data_end=data_end)
+        self.assertFalse(trade["still_open"])
+        self.assertEqual(trade["exit_reason"], "delisted")

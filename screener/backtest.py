@@ -153,10 +153,22 @@ def _ma_at(bars, period):
     return series[-1] if series else None
 
 
+def _weeks_before(date_str, weeks):
+    """`date_str` minus n weeks, as an ISO date string.
+
+    Used to decide whether a price series ended because the company
+    stopped trading or merely because the data does. Three weeks of slack
+    covers a stale final bar without swallowing a real delisting.
+    """
+    day = datetime.date.fromisoformat(date_str[:10])
+    return (day - datetime.timedelta(weeks=weeks)).isoformat()
+
+
 def simulate_trade(ticker, entry_date, entry_price, swing_stop, swing_target, bars_full,
                     trailing_method='ma', max_hold_weeks=52,
                     partial_exit_fraction=None, take_profit_above_ma_pct=None,
-                    stall_exit_weeks=None, stall_exit_min_gain_pct=0.0):
+                    stall_exit_weeks=None, stall_exit_min_gain_pct=0.0,
+                    data_end=None):
     """Walks forward week by week from entry_date, recomputing
     stop_loss.trailing_stop() using only bars up to and including each
     simulated week (a real trailing stop can only react to price action
@@ -228,7 +240,19 @@ def simulate_trade(ticker, entry_date, entry_price, swing_stop, swing_target, ba
 
         bar = bars_full[idx]
         if stop is not None and bar["low"] <= stop:
-            exit_idx, exit_price = idx, stop
+            # A gap through the stop fills at the open, not at the stop.
+            # Booking the stop price regardless is a free lunch the market
+            # does not offer, and it is the same class of error as the
+            # retroactive entry fill that was once worth +1.11 points a
+            # trade — the whole of the measured edge.
+            #
+            # Measured before fixing: exits gap through the stop on 0.9%
+            # of R20 trades and 6.6% of M9's, overstating those exits by a
+            # median 14% and up to 86% of entry. Averaged over all stop
+            # exits it is 0.16 to 0.28 points per trade, always flattering.
+            gap_open = bar.get("open")
+            exit_price = min(stop, gap_open) if gap_open else stop
+            exit_idx = idx
             break
         if (
             swing_target is not None
@@ -271,6 +295,39 @@ def simulate_trade(ticker, entry_date, entry_price, swing_stop, swing_target, ba
     took_partial = partial_idx is not None
     remainder_closed = exit_idx is not None
 
+    # A position still open when the bars run out is one of two entirely
+    # different things, and the difference decides whether it counts.
+    #
+    # If the company stopped trading — acquired, or delisted — the shares
+    # converted to cash or became worthless. That is a closed outcome and
+    # excluding it discards a population that is not neutral: of 88 such
+    # trades in S1's full-universe arm, 73 were gains at a median +16.2%
+    # with a worst case of -3.4%. They were acquisitions closing at a
+    # premium, while the bankruptcies had already been taken by stops on
+    # the way down. The old behaviour counted the failures and threw away
+    # the buyouts, which made survivorship look worse than it was.
+    #
+    # But a series also ends simply because the data does, which is true
+    # of every stock still listed today. Deciding from the bars alone
+    # marks every live position as delisted — my first attempt did
+    # exactly that, and four existing tests caught it.
+    #
+    # So the caller has to say when the data ends. `data_end` is the date
+    # through which bars are believed complete; a series finishing well
+    # before it means the ticker stopped trading. Without it, behaviour
+    # is unchanged and the position stays open, which is the safe default.
+    ran_past_data = last_idx >= len(bars_full) - 1
+    stopped_trading = False
+    if ran_past_data and data_end and bars_full:
+        stopped_trading = bars_full[-1]["time"][:10] < _weeks_before(data_end, 3)
+    if not remainder_closed and stopped_trading:
+        exit_idx = last_idx
+        exit_price = bars_full[last_idx]["close"]
+        remainder_closed = True
+        delisted = True
+    else:
+        delisted = False
+
     if not remainder_closed:
         return {
             "ticker": ticker,
@@ -287,10 +344,10 @@ def simulate_trade(ticker, entry_date, entry_price, swing_stop, swing_target, ba
     if took_partial:
         held = 1.0 - partial_exit_fraction
         blended_exit = partial_exit_fraction * partial_price + held * exit_price
-        exit_reason = "target_then_stop"
+        exit_reason = "delisted" if delisted else "target_then_stop"
     else:
         blended_exit = exit_price
-        exit_reason = "stall" if stalled else "stop"
+        exit_reason = "delisted" if delisted else ("stall" if stalled else "stop")
 
     return {
         "ticker": ticker,
@@ -591,8 +648,29 @@ def simulate_short_trade(ticker, entry_date, entry_price, buy_stop, target, bars
     if exit_idx is None:
         exit_idx = last_idx
         exit_price = bars_full[last_idx]["close"]
-        still_open = True
-        exit_reason = "still_open"
+        # Running out of bars means one of two very different things.
+        #
+        # If the hold cap stopped us short of the data, the position is
+        # genuinely unresolved and must be excluded — counting it would
+        # book an outcome that has not happened.
+        #
+        # If the *series itself* ended, the company stopped existing:
+        # acquired, or delisted. The shares converted to cash or became
+        # worthless, and either way that is a real, closed outcome.
+        # Treating it as "still open" discards it, and the discarded
+        # population is not neutral — of 88 such trades checked in arm B
+        # of S1, 73 were gains with a median of +16.2% and a worst case
+        # of -3.4%. They were acquisitions closing at a premium, while
+        # the bankruptcies had already been caught by stops on the way
+        # down. So the old behaviour counted the failures and threw away
+        # the buyouts, making survivorship look worse than it is.
+        ran_out_of_data = last_idx >= len(bars_full) - 1
+        if ran_out_of_data:
+            still_open = False
+            exit_reason = "delisted"
+        else:
+            still_open = True
+            exit_reason = "still_open"
     else:
         still_open = False
         exit_reason = "target_then_stop" if partial_idx is not None else "stop"
