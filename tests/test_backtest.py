@@ -1086,6 +1086,30 @@ class DelistingExitTest(unittest.TestCase):
             max_hold_weeks=520)
         self.assertTrue(trade["still_open"])
 
+    def test_entering_on_the_final_bar_is_not_a_trade(self):
+        # The delisting exit would otherwise land on the entry bar, giving
+        # a position with no holding period whose exit sorts before its own
+        # entry. simulate_fixed_capital's open_count assertion catches that
+        # downstream, but the trade should never have existed: there was no
+        # next bar to hold into.
+        bars = self._bars([100.0] * 10, start="2019-01-04")
+        trade = backtest.simulate_trade(
+            "T", bars[-1]["time"][:10], bars[-1]["close"],
+            swing_stop=90.0, swing_target=200.0, bars_full=bars,
+            max_hold_weeks=520, data_end="2026-01-01")
+        self.assertIsNone(trade)
+
+    def test_a_position_with_one_bar_to_hold_is_still_a_trade(self):
+        # The boundary: one bar of holding is a real, if brief, trade.
+        bars = self._bars([100.0] * 9 + [130.0], start="2019-01-04")
+        trade = backtest.simulate_trade(
+            "T", bars[-2]["time"][:10], bars[-2]["close"],
+            swing_stop=90.0, swing_target=500.0, bars_full=bars,
+            max_hold_weeks=520, data_end="2026-01-01")
+        self.assertIsNotNone(trade)
+        self.assertFalse(trade["still_open"])
+        self.assertGreater(trade["return_pct"], 20.0)
+
     def test_a_slightly_stale_final_bar_is_not_a_delisting(self):
         # Bars routinely lag the nominal data date by a few days — a
         # weekend, a holiday, a vendor's update schedule. Without slack,

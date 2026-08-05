@@ -2834,3 +2834,70 @@ exit date equal to the entry date and a zero-length position. The
 `open_count == 0` assertion in simulate_fixed_capital caught it — an
 assertion added earlier when removing unreachable code, which has now
 paid for itself.
+
+---
+
+## Batch 23 — the moving average nobody ever varied. Registered 2026-08-05
+
+196 arms have been run in this project. **Not one varied the moving
+average.** `MA_PERIOD = 30` has been treated as canonical for the entire
+project because Weinstein said so, while we swept mined thresholds, stop
+ceilings, volume ratios, evidence floors and hold caps around it.
+
+R7 was registered long ago to compare SMA against WMA and EMA and was
+never executed. `ema()` does not exist in moving_averages.py. The code
+currently uses a WMA for slope direction while comparing price to an
+SMA, an inconsistency nobody chose.
+
+Batch 8 is the precedent that makes this urgent: the mined thresholds
+turned out to sit on a plateau so flat their specific values carried no
+information. **We do not know whether 30 weeks is a plateau or a peak.**
+If it is a peak, it is a fitted parameter we inherited rather than
+chose — and inherited fitting is still fitting.
+
+### T1 — moving-average length, weekly `[structural]`
+M9 with `ma_weeks` swept across 5, 8, 10, 15, 20, 25, 30, 35, 40, 50.
+Momentum lookback held at 52 weeks so only one thing moves. Universe C
+(point-in-time, still-listed) for tractable runtime; the comparison is
+between lengths on a consistent universe, so composition bias affects
+all arms equally.
+
+**Criterion:** a plateau means 30 is arbitrary and any value in the
+range serves — which would be reassuring, since it means the result does
+not depend on a number we inherited. A peak at 30 would be more
+troubling than gratifying: it would mean Weinstein's number is doing
+work we cannot explain and cannot have discovered independently.
+
+**Expectation:** a broad plateau between roughly 20 and 40 weeks, with
+degradation at 5-10 (too noisy, whipsaw) and at 50 (too slow, gives back
+too much). Genuinely uncertain below 15.
+
+### T2 — moving-average type `[structural]`
+The unrun R7, finally. SMA against WMA against EMA at the best length
+from T1. Requires writing `ema()`, which does not exist.
+
+### T3 — daily bars and a shorter clock `[data]`
+The 30-week average is roughly 150 trading days. Sweep 20, 50, 100, 150
+and 200 days on daily bars over the 2005-2009 window, checking stops
+daily rather than weekly.
+
+This is the test most aligned with what can actually be operated: daily
+stop management is feasible, minute-by-minute is not. It needs a
+Sharadar daily cache built for the point-in-time universe first, since
+the existing daily cache is Webull's and carries the split corruption.
+
+**Expectation:** worse than weekly after costs. Shorter clocks mean more
+signals, more turnover, and our breakeven sweep says roughly two points
+of annual return per 1% of per-side slippage. The interesting outcome
+would be daily *matching* weekly, which would mean the clock is not what
+matters.
+
+### T4 — cash or the index `[structural]`
+When the strategy is not in stocks it currently earns a fixed cash yield.
+That is right when the market gate is off — 2008 is the case the gate
+exists for — but wrong when the gate is on and there are simply no stock
+signals, which is common given deployment runs 57-88%.
+
+Policy to test: gate off means cash, gate on with no signals means SPY.
+Also corrects a way the current model flatters us, crediting 3-4% on
+idle cash through periods when the index returned 15%.
