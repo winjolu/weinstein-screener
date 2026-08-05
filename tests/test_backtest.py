@@ -1113,3 +1113,17 @@ class DelistingExitTest(unittest.TestCase):
             max_hold_weeks=520, data_end=data_end)
         self.assertFalse(trade["still_open"])
         self.assertEqual(trade["exit_reason"], "delisted")
+
+
+class DataEndWiringTest(unittest.TestCase):
+    """run_backtest must forward data_end, or the delisting exit is dead
+    code in every real run — the parameter would exist, be tested in
+    isolation, and never actually reach the simulation."""
+
+    def test_run_backtest_accepts_and_forwards_data_end(self):
+        import inspect
+        sig = inspect.signature(backtest.run_backtest)
+        self.assertIn("data_end", sig.parameters)
+        src = inspect.getsource(backtest.run_backtest)
+        self.assertIn("data_end=data_end", src,
+                      "data_end is accepted but never passed to simulate_trade")

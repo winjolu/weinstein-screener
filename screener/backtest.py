@@ -411,7 +411,7 @@ def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, paramete
                   fetch_sector=True, entry_at="signal",
                   take_profit_above_ma_pct=None,
                   stall_exit_weeks=None, stall_exit_min_gain_pct=0.0,
-                  max_stop_pct=None, entry_rule=None,
+                  max_stop_pct=None, entry_rule=None, data_end=None,
                   **condition_overrides):
     """Steps through start_date to end_date at check_interval_weeks
     intervals. At each checkpoint, evaluates each ticker as of that date
@@ -574,6 +574,7 @@ def run_backtest(tickers, start_date, end_date, check_interval_weeks=4, paramete
                 take_profit_above_ma_pct=take_profit_above_ma_pct,
                 stall_exit_weeks=stall_exit_weeks,
                 stall_exit_min_gain_pct=stall_exit_min_gain_pct,
+                data_end=data_end,
             )
             if trade is None:
                 continue
