@@ -320,6 +320,13 @@ def simulate_trade(ticker, entry_date, entry_price, swing_stop, swing_target, ba
     stopped_trading = False
     if ran_past_data and data_end and bars_full:
         stopped_trading = bars_full[-1]["time"][:10] < _weeks_before(data_end, 3)
+    # Entering on a company's very last bar leaves no holding period at
+    # all: the delisting exit would land on the entry bar itself, giving
+    # a zero-duration trade whose exit sorts before its own entry and
+    # corrupts any ledger built from the events. It is also not a trade
+    # anyone could have made — there was no next bar to hold into.
+    if stopped_trading and last_idx <= entry_idx:
+        return None
     if not remainder_closed and stopped_trading:
         exit_idx = last_idx
         exit_price = bars_full[last_idx]["close"]
