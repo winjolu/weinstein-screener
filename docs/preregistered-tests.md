@@ -3130,9 +3130,26 @@ entries before the sixth returned +559.8%).
 | 15% | 9,648 | 3,476 | 2.78 | 35.4 | -6.37 | +1.68% | +0.69% |
 | 20% | 6,826 | 3,082 | 2.21 | 36.9 | -6.47 | +4.51% | +3.52% |
 | 25% | 4,904 | 2,617 | 1.87 | 38.1 | -6.91 | +4.46% | +3.47% |
+| 30% | 3,552 | 2,143 | 1.66 | 39.4 | -7.37 | +4.36% | +3.37% |
 
-Band 30 is missing: the sweep died on a database lock in its final band
-and the partial rows were discarded rather than read. It is re-running.
+Band 30 was re-run alone after the sweep died on a database lock in that
+band; the partial rows were discarded rather than read. Alone, on a local
+database, it took 652s for 3,552 trades against band 25's 2,754s for
+4,904 — roughly three times faster per trade, which is the clearest
+measure yet of what the shared synced database was costing.
+
+### A plateau rather than a peak, and one step that does not fit
+
+Bands 20, 25 and 30 land within 0.15 points of each other. That is the
+shape a real effect makes: a single spiking band would be the signature
+of fitting noise, and there is no spike here.
+
+The step between 15% and 20% does not fit as cleanly — +1.68% to +4.51%
+is most of the total effect arriving between two adjacent settings, when
+every other neighbouring pair moves by fractions of a point. Either
+there is a threshold there or it is a boundary artifact, and nothing in
+this table distinguishes those. Worth a band at 17 or 18 before any of
+this is leaned on.
 
 ### The mechanism survives, but weaker than T5 claimed
 
