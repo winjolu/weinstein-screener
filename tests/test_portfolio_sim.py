@@ -881,3 +881,96 @@ class RiskAdjustedTest(unittest.TestCase):
             fresh = {f"S{i}": [{"time": "2020-01-01", "close": float(i)}]}
             index = portfolio_sim._price_index(fresh)
             self.assertNotIn("GHOST", index)
+
+
+class ParkedCashTest(unittest.TestCase):
+    """Idle capital in an index fund rather than cash, when appropriate.
+
+    Which is right depends on *why* the capital is idle. Gate off — the
+    2008 case — and cash is correct, because the index is precisely what
+    is being avoided. Gate on with nothing to buy, and holding cash earns
+    3% while the index earns 15%, which the old model credited as if it
+    were prudence.
+    """
+
+    TRADE = [{"ticker": "AAA", "entry_date": "2020-01-06", "exit_date": "2020-02-03",
+              "entry_price": 10.0, "return_pct": 0.0, "still_open": 0}]
+
+    def _index(self, weekly_return):
+        import datetime
+        day = datetime.date(2020, 1, 6)
+        bars, price = [], 100.0
+        for i in range(60):
+            bars.append({"time": (day + datetime.timedelta(weeks=i)).isoformat()
+                         + "T00:00:00.000+0000", "close": price})
+            price *= (1 + weekly_return)
+        return bars
+
+    def test_parking_in_a_rising_index_beats_a_cash_rate(self):
+        bars = {"AAA": [{"time": "2020-01-06T00:00:00.000+0000", "close": 10.0},
+                        {"time": "2020-02-03T00:00:00.000+0000", "close": 10.0}],
+                "SPY": self._index(0.01)}
+        cash_only = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=10000.0, cash_yield_pct=3.0, bars_by_symbol=bars)
+        parked = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=10000.0, cash_yield_pct=3.0, bars_by_symbol=bars,
+            park_in="SPY")
+        self.assertGreater(parked["ending_equity"], cash_only["ending_equity"])
+
+    def test_parking_in_a_falling_index_is_worse_than_cash(self):
+        # The case the gate exists to avoid. If this ever passes the other
+        # way, the policy is being applied when it should not be.
+        bars = {"AAA": [{"time": "2020-01-06T00:00:00.000+0000", "close": 10.0},
+                        {"time": "2020-02-03T00:00:00.000+0000", "close": 10.0}],
+                "SPY": self._index(-0.01)}
+        cash_only = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=10000.0, cash_yield_pct=3.0, bars_by_symbol=bars)
+        parked = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=10000.0, cash_yield_pct=3.0, bars_by_symbol=bars,
+            park_in="SPY")
+        self.assertLess(parked["ending_equity"], cash_only["ending_equity"])
+
+    def test_park_when_can_refuse_and_fall_back_to_cash(self):
+        # The regime-aware policy: park only while the gate is on.
+        bars = {"AAA": [{"time": "2020-01-06T00:00:00.000+0000", "close": 10.0},
+                        {"time": "2020-02-03T00:00:00.000+0000", "close": 10.0}],
+                "SPY": self._index(-0.01)}
+        never = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=10000.0, cash_yield_pct=3.0, bars_by_symbol=bars,
+            park_in="SPY", park_when=lambda d: False)
+        cash_only = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=10000.0, cash_yield_pct=3.0, bars_by_symbol=bars)
+        self.assertAlmostEqual(never["ending_equity"], cash_only["ending_equity"], places=6)
+
+    def test_an_unknown_park_symbol_falls_back_rather_than_crashing(self):
+        bars = {"AAA": [{"time": "2020-01-06T00:00:00.000+0000", "close": 10.0},
+                        {"time": "2020-02-03T00:00:00.000+0000", "close": 10.0}]}
+        acct = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=10000.0, cash_yield_pct=3.0, bars_by_symbol=bars,
+            park_in="NOSUCH")
+        self.assertGreater(acct["ending_equity"], 10000.0)
+
+    def test_default_behaviour_is_unchanged(self):
+        bars = {"AAA": [{"time": "2020-01-06T00:00:00.000+0000", "close": 10.0},
+                        {"time": "2020-02-03T00:00:00.000+0000", "close": 10.0}],
+                "SPY": self._index(0.01)}
+        a = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=10000.0, cash_yield_pct=3.0, bars_by_symbol=bars)
+        b = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=10000.0, cash_yield_pct=3.0, bars_by_symbol=bars,
+            park_in=None)
+        self.assertAlmostEqual(a["ending_equity"], b["ending_equity"], places=6)
+
+    def test_parking_replaces_the_cash_rate_rather_than_adding_to_it(self):
+        # A flat index earns nothing, so a parked account must end exactly
+        # where it started. If the cash rate is also applied the equity
+        # rises, which every "parked beats cash" assertion would happily
+        # pass — the double-credit only shows up against an exact value.
+        bars = {"AAA": [{"time": "2020-01-06T00:00:00.000+0000", "close": 10.0},
+                        {"time": "2020-02-03T00:00:00.000+0000", "close": 10.0}],
+                "SPY": self._index(0.0)}
+        acct = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=10000.0, cash_yield_pct=8.0, bars_by_symbol=bars,
+            park_in="SPY")
+        self.assertAlmostEqual(acct["ending_equity"], 10000.0, places=4)
+        self.assertAlmostEqual(acct["interest_earned"], 0.0, places=4)
