@@ -176,3 +176,92 @@ def delisted_tickers(**params):
     the survivorship hole; its returns are the correction.
     """
     return [r for r in ticker_metadata(**params) if r["isdelisted"]]
+
+
+# ---------------------------------------------------------------------
+# Keeping the local database current.
+#
+# The bulk export is a snapshot: 46M price rows and 14M daily
+# fundamentals, downloaded once and already stale by the next close. Any
+# operation that needs *today* has to top up from the API.
+#
+# Incremental rather than wholesale, because re-downloading 6GB to add
+# one day's bars is how a daily refresh becomes something nobody runs.
+
+DB_PATH = os.path.expanduser("~/market-data/sharadar.db")
+
+# Which column carries the as-of date, per table. Sharadar is not
+# consistent about this and guessing produces an empty refresh that
+# looks like "no new data" rather than an error.
+DATE_COLUMN = {
+    "prices": "date",
+    "fundprices": "date",
+    "dailyfundamentals": "date",
+    "fundamentals": "calendardate",
+    "actions": "date",
+    "events": "date",
+    "insiders": "filingdate",
+    "sp500": "date",
+}
+
+# Local table name -> the API table it comes from, where they differ.
+API_TABLE = {"prices": "stocks", "fundprices": "funds",
+             "dailyfundamentals": "daily"}
+
+
+def latest_local_date(table, db_path=None):
+    """Newest date already stored, or None if the table is empty."""
+    import sqlite3
+    column = DATE_COLUMN.get(table)
+    if not column:
+        raise ValueError(f"no date column known for {table!r}; add it to DATE_COLUMN")
+    conn = sqlite3.connect(db_path or DB_PATH)
+    try:
+        row = conn.execute(f"SELECT MAX({column}) FROM {table}").fetchone()
+    finally:
+        conn.close()
+    return row[0] if row and row[0] else None
+
+
+def refresh(table, db_path=None, since=None, dry_run=False):
+    """Append rows dated after what we already hold.
+
+    Returns the number of rows inserted. Safe to run repeatedly: it asks
+    only for dates strictly after the newest stored, so a second run in
+    the same day adds nothing rather than duplicating.
+
+    Deliberately does not deduplicate. If a vendor restates a row we
+    would end up with both versions, which is visible and fixable —
+    whereas silently overwriting history is the restatement problem this
+    project spent a day learning to avoid.
+    """
+    import sqlite3
+    column = DATE_COLUMN.get(table)
+    if not column:
+        raise ValueError(f"no date column known for {table!r}")
+    start = since or latest_local_date(table, db_path)
+    if not start:
+        raise ValueError(f"{table} is empty; load the bulk export first, "
+                         "do not build it one day at a time")
+
+    rows = fetch(API_TABLE.get(table, table), **{f"{column}.gt": start})
+    if dry_run or not rows:
+        return len(rows)
+
+    conn = sqlite3.connect(db_path or DB_PATH)
+    try:
+        cols = [c[1] for c in conn.execute(f"PRAGMA table_info({table})")]
+        payload = [tuple(r.get(c) for c in cols) for r in rows]
+        conn.executemany(
+            f"INSERT INTO {table} VALUES ({','.join('?' * len(cols))})", payload)
+        conn.commit()
+    finally:
+        conn.close()
+    return len(payload)
+
+
+def refresh_all(tables=("prices", "fundprices", "dailyfundamentals"), db_path=None):
+    """Top up the tables a live screener actually reads. Returns
+    {table: rows_added}, and lets a failure on one table surface rather
+    than silently leaving the rest stale."""
+    return {t: refresh(t, db_path=db_path) for t in tables}

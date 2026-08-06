@@ -182,3 +182,69 @@ class DelistedTest(_Stubbed):
         rows = {r["ticker"]: r for r in sharadar.ticker_metadata()}
         self.assertEqual(rows["LEH"]["permaticker"], "120568")
         self.assertNotEqual(rows["LEH"]["permaticker"], rows["AAPL"]["permaticker"])
+
+
+class RefreshTest(_Stubbed):
+    """Topping up the local database from the API.
+
+    The bulk export is a snapshot and stale by the next close. Anything
+    needing today's data has to fetch incrementally — re-downloading 6GB
+    to add one day is how a daily refresh becomes something nobody runs.
+    """
+
+    def _db(self):
+        import sqlite3, tempfile, os
+        fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE prices (ticker TEXT, date TEXT, close REAL)")
+        conn.executemany("INSERT INTO prices VALUES (?,?,?)",
+                         [("AAPL", "2026-08-03", 100.0), ("AAPL", "2026-08-04", 101.0)])
+        conn.commit(); conn.close()
+        self.addCleanup(os.remove, path)
+        return path
+
+    def test_it_asks_only_for_dates_after_what_we_hold(self):
+        path = self._db()
+        self.stub([[]])
+        sharadar.refresh("prices", db_path=path)
+        self.assertEqual(self.calls[0][1]["date.gt"], "2026-08-04")
+
+    def test_new_rows_are_appended(self):
+        path = self._db()
+        self.stub([[{"ticker": "AAPL", "date": "2026-08-05", "close": "102.0"}]])
+        added = sharadar.refresh("prices", db_path=path)
+        self.assertEqual(added, 1)
+        import sqlite3
+        conn = sqlite3.connect(path)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0], 3)
+        conn.close()
+
+    def test_running_twice_in_a_day_adds_nothing(self):
+        path = self._db()
+        self.stub([[], []])
+        self.assertEqual(sharadar.refresh("prices", db_path=path), 0)
+        self.assertEqual(sharadar.refresh("prices", db_path=path), 0)
+
+    def test_an_empty_table_refuses_rather_than_backfilling_one_day_at_a_time(self):
+        import sqlite3, tempfile, os
+        fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE prices (ticker TEXT, date TEXT, close REAL)")
+        conn.commit(); conn.close()
+        self.addCleanup(os.remove, path)
+        with self.assertRaises(ValueError):
+            sharadar.refresh("prices", db_path=path)
+
+    def test_an_unknown_table_raises_rather_than_guessing_the_date_column(self):
+        # Guessing wrong produces an empty refresh that reads as "no new
+        # data" instead of an error, which is the worst possible failure.
+        with self.assertRaises(ValueError):
+            sharadar.latest_local_date("some_new_table", db_path=self._db())
+
+    def test_the_api_table_name_is_translated(self):
+        # Local `prices` comes from the API's `stocks`. Sending the local
+        # name would query a table that does not exist.
+        path = self._db()
+        self.stub([[]])
+        sharadar.refresh("prices", db_path=path)
+        self.assertEqual(self.calls[0][0], "stocks")
