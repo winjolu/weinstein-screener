@@ -8,7 +8,15 @@ import json
 import os
 import sqlite3
 
-DB_PATH = os.path.join(
+# The default sits under the project, which on this machine is inside a
+# folder a sync client watches. That is fine for the screener's own runs
+# and bad for a backtest: every trade is its own DELETE+INSERT, so a
+# 40,000-trade arm is 80,000 write transactions handed to a filesystem
+# that is uploading the file underneath them. Pointing SCREENER_DB at
+# local disk for a long run and merging afterwards is far faster, and it
+# lets two arms run at once without fighting for the same lock — which
+# has already cost me a four-hour sweep.
+DB_PATH = os.environ.get("SCREENER_DB") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "screener.db"
 )
 
@@ -232,7 +240,15 @@ def _connect():
     """
     global _schema_ready_for
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    # Sixty seconds rather than the five Python defaults to. Two backtest
+    # arms running at once lost one of them outright: a six-band sweep
+    # died on "database is locked" in its final band, after four hours,
+    # having written five bands I could still use and a sixth I had to
+    # throw away. This database also lives inside a synced folder, so a
+    # write can block on the sync client rather than on the other writer,
+    # and five seconds is well inside what that costs. Waiting a minute
+    # is always cheaper than losing the run.
+    conn = sqlite3.connect(DB_PATH, timeout=60.0)
     if _schema_ready_for != DB_PATH:
         _rebuild_stale_cache_tables(conn)
         conn.executescript(SCHEMA)
@@ -752,5 +768,41 @@ def get_backtest_trades(parameter_set=None):
                 (parameter_set,),
             ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def merge_backtest_trades(source_path, db_path=None):
+    """Copy backtest_trades out of a side database into the main one.
+
+    The companion to SCREENER_DB: a long arm writes to local disk, and
+    its results are folded back here when it finishes. Only
+    backtest_trades moves — a side database has no screener history worth
+    keeping, and copying tables wholesale would overwrite real runs with
+    a scratch file's empty ones.
+
+    Returns the number of rows added. Existing rows for a parameter_set
+    are cleared first, so re-merging a re-run arm replaces it rather than
+    doubling it — silently doubling an arm is exactly the kind of fault
+    that reads as a real change in the numbers.
+    """
+    conn = sqlite3.connect(db_path or DB_PATH, timeout=60.0)
+    try:
+        conn.executescript(SCHEMA)
+        conn.execute("ATTACH DATABASE ? AS src", (source_path,))
+        sets = [r[0] for r in conn.execute(
+            "SELECT DISTINCT parameter_set FROM src.backtest_trades")]
+        for name in sets:
+            conn.execute("DELETE FROM backtest_trades WHERE parameter_set IS ?", (name,))
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(backtest_trades)")
+                if r[1] != "id"]
+        collist = ", ".join(cols)
+        before = conn.execute("SELECT COUNT(*) FROM backtest_trades").fetchone()[0]
+        conn.execute(f"INSERT INTO backtest_trades ({collist}) "
+                     f"SELECT {collist} FROM src.backtest_trades")
+        after = conn.execute("SELECT COUNT(*) FROM backtest_trades").fetchone()[0]
+        conn.commit()
+        conn.execute("DETACH DATABASE src")
+        return after - before
     finally:
         conn.close()

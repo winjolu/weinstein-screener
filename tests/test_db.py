@@ -8,6 +8,7 @@ nothing obviously to do with the database.
 """
 import os
 import tempfile
+import sqlite3
 import unittest
 
 from screener import db
@@ -239,3 +240,106 @@ class SecurityIdentityCacheTest(_TempDB):
         conn.close()
         self.assertEqual(n, 1)
         self.assertEqual(db.get_cached_identity("GM")["company_name"], "GENERAL MOTORS CO")
+
+
+class BusyTimeoutTest(unittest.TestCase):
+    """A locked database must be waited on, not surrendered to.
+
+    Two arms running concurrently killed a four-hour sweep in its final
+    band. The default five seconds is not a considered choice, it is
+    Python's default, and it is far inside what a write costs when the
+    file sits in a folder a sync client is also touching.
+    """
+
+    def test_the_connection_waits_a_full_minute_for_a_lock(self):
+        conn = db._connect()
+        try:
+            self.assertGreaterEqual(
+                conn.execute("PRAGMA busy_timeout").fetchone()[0], 60000)
+        finally:
+            conn.close()
+
+
+class MergeBacktestTradesTest(unittest.TestCase):
+    """Folding a side database's arms back into the main one.
+
+    A long arm writes to local disk to keep 80,000 write transactions out
+    of a synced folder. That is only safe if bringing the results home is
+    exact.
+    """
+
+    def _side(self, rows):
+        import os as _os
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".db"); _os.close(fd)
+        self.addCleanup(_os.remove, path)
+        prev = db.DB_PATH
+        db.DB_PATH = path
+        db._schema_ready_for = None
+        try:
+            for r in rows:
+                db.insert_backtest_trade(r)
+        finally:
+            db.DB_PATH = prev
+            db._schema_ready_for = None
+        return path
+
+    def _main(self):
+        import os as _os
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".db"); _os.close(fd)
+        self.addCleanup(_os.remove, path)
+        return path
+
+    def _trade(self, ticker, tag, entry="2020-01-06"):
+        return {"ticker": ticker, "as_of_date": entry,
+                "entry_date": entry, "exit_date": "2020-03-02",
+                "entry_price": 10.0, "exit_price": 11.0, "return_pct": 10.0,
+                "parameter_set": tag, "still_open": 0}
+
+    def test_rows_arrive_in_the_main_database(self):
+        side = self._side([self._trade("AAA", "x1"), self._trade("BBB", "x1")])
+        main = self._main()
+        self.assertEqual(db.merge_backtest_trades(side, db_path=main), 2)
+        conn = sqlite3.connect(main)
+        self.assertEqual(
+            conn.execute("SELECT COUNT(*) FROM backtest_trades").fetchone()[0], 2)
+        conn.close()
+
+    def test_merging_the_same_arm_twice_replaces_rather_than_doubles(self):
+        # A doubled arm does not error, it just reports twice the trades
+        # at the same statistics — which reads as a real result.
+        side = self._side([self._trade("AAA", "x1")])
+        main = self._main()
+        db.merge_backtest_trades(side, db_path=main)
+        db.merge_backtest_trades(side, db_path=main)
+        conn = sqlite3.connect(main)
+        self.assertEqual(
+            conn.execute("SELECT COUNT(*) FROM backtest_trades").fetchone()[0], 1)
+        conn.close()
+
+    def test_an_unrelated_arm_already_present_is_left_alone(self):
+        main = self._main()
+        prev = db.DB_PATH
+        db.DB_PATH = main; db._schema_ready_for = None
+        try:
+            db.insert_backtest_trade(self._trade("ZZZ", "keepme"))
+        finally:
+            db.DB_PATH = prev; db._schema_ready_for = None
+        side = self._side([self._trade("AAA", "x1")])
+        db.merge_backtest_trades(side, db_path=main)
+        conn = sqlite3.connect(main)
+        tags = {r[0] for r in conn.execute("SELECT DISTINCT parameter_set FROM backtest_trades")}
+        self.assertEqual(tags, {"keepme", "x1"})
+        conn.close()
+
+    def test_the_values_survive_the_trip(self):
+        side = self._side([self._trade("AAA", "x1")])
+        main = self._main()
+        db.merge_backtest_trades(side, db_path=main)
+        conn = sqlite3.connect(main); conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM backtest_trades").fetchone()
+        self.assertEqual(row["ticker"], "AAA")
+        self.assertAlmostEqual(row["return_pct"], 10.0)
+        self.assertEqual(row["parameter_set"], "x1")
+        conn.close()
