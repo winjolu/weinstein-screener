@@ -3059,3 +3059,54 @@ headline.
   that declines to park is not billed for trades it never made.
 - **The flat cash rate remains an anachronism.** Wanted alongside the
   era-aware broker profile.
+
+---
+
+## W2 — the two dirty windows, re-run on corrected data
+
+T4's edge over buy-and-hold in 2010-2020 and 2021-2026 came off the old
+Webull universes. Re-run on point-in-time Sharadar universes rebuilt
+under one explicit rule (domestic common stock, real exchange, listed at
+the window start, usable bars), with the always-parked policy fixed in
+advance:
+
+| window | rule | universe | trades | always-parked | vs B&H |
+|---|---|---|---|---|---|
+| 2021-2026 | R20 | survivor-biased | 3,908 | +16.21% | +4.06% |
+| 2021-2026 | R20 | **corrected** | 6,225 | +12.09% | **-0.06%** |
+| 2021-2026 | M9 | survivor-biased | 29,235 | +23.70% | +11.55% |
+| 2021-2026 | M9 | **corrected** | 40,067 | +4.35% | **-7.80%** |
+| 2010-2020 | R20 | survivor-biased | 3,578 | +15.54% | +1.77% |
+| 2010-2020 | R20 | **corrected** | 7,885 | +7.02% | **-6.75%** |
+
+`w2_2010_M9` was still running when this was written and is deliberately
+not reported. Its row count looked complete two hours before it was.
+
+### Every edge over buy-and-hold was survivorship
+
+The +11.55% flagged as "probably an artifact" was entirely an artifact.
+M9 loses nineteen points in 2021-2026 on correction alone. Of the three
+arms resolved so far, one ties the index and two lose to it by six to
+eight points a year.
+
+Set beside 2005-2009, where the corrected arms did beat buy-and-hold,
+the shape is consistent: **this strategy beats the index only when the
+index does badly.** It won the 2008 window and loses the two bull
+windows by six to eight points a year. That is what a trend-following
+stop-loss system structurally is — premiums paid in good years against a
+payout in the crash — and it is not an edge, it is insurance with a
+price attached.
+
+### The confound that decides what to do next
+The corrected universes are not merely less survivor-biased, they are
+**3.3x larger** (1,257 names against ~4,100). They add the previously
+missed small and micro caps as well as the dead ones. So an unknown part
+of this collapse is trading names too small to trade rather than
+survivorship as such. Those are different problems: one is fatal to the
+method, the other is fixed with a liquidity filter.
+
+S1 already has the shape that separates them — B adds the dead and the
+missed, C restricts to names that still exist. The missing arm is a
+liquidity-filtered universe (dollar volume floor at the point of entry),
+run against both. Until that exists, "the strategy loses to buy-and-hold
+in bull markets" is supported and "the method does not work" is not.
