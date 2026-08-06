@@ -969,8 +969,98 @@ class ParkedCashTest(unittest.TestCase):
         bars = {"AAA": [{"time": "2020-01-06T00:00:00.000+0000", "close": 10.0},
                         {"time": "2020-02-03T00:00:00.000+0000", "close": 10.0}],
                 "SPY": self._index(0.0)}
+        # Transaction costs off, because this is isolating the accrual:
+        # with them on, "exactly where it started" is no longer the right
+        # expectation and the double-credit this catches would hide
+        # inside the cost. ParkingCostTest covers the cost separately.
         acct = portfolio_sim.simulate_fixed_capital(
             self.TRADE, capital=10000.0, cash_yield_pct=8.0, bars_by_symbol=bars,
-            park_in="SPY")
+            park_in="SPY", park_cost_pct=0.0)
         self.assertAlmostEqual(acct["ending_equity"], 10000.0, places=4)
         self.assertAlmostEqual(acct["interest_earned"], 0.0, places=4)
+
+
+class ParkingCostTest(unittest.TestCase):
+    """Getting in and out of the parked fund is a real transaction.
+
+    Modelling parking as pure accrual on idle cash was worth about a
+    point a year on the busiest arm, which is the same order as the
+    entire edge being measured. Every position entered has to be funded
+    by selling the fund and every exit buys it back, so a strategy that
+    trades more pays more for the privilege of staying invested — and
+    that is exactly the trade-off the parking decision is about.
+    """
+
+    TRADE = [{"ticker": "AAA", "entry_date": "2020-01-06", "exit_date": "2020-02-03",
+              "entry_price": 10.0, "return_pct": 0.0, "still_open": 0}]
+
+    def _flat_index(self):
+        import datetime
+        day = datetime.date(2020, 1, 6)
+        return [{"time": (day + datetime.timedelta(weeks=i)).isoformat()
+                 + "T00:00:00.000+0000", "close": 100.0} for i in range(60)]
+
+    def _bars(self):
+        return {"AAA": [{"time": "2020-01-06T00:00:00.000+0000", "close": 10.0},
+                        {"time": "2020-02-03T00:00:00.000+0000", "close": 10.0}],
+                "SPY": self._flat_index()}
+
+    def _run(self, **kw):
+        return portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=10000.0, cash_yield_pct=0.0,
+            bars_by_symbol=self._bars(), **kw)
+
+    def test_a_round_trip_costs_both_legs(self):
+        # Flat index, flat trade, no cash yield: the only thing that can
+        # move the account is the parking cost. One entry at $1,000 and
+        # one exit at $1,000, charged 1% each, is exactly $20.
+        out = self._run(park_in="SPY", park_cost_pct=1.0)
+        self.assertAlmostEqual(out["ending_equity"], 10000.0 - 20.0, places=6)
+
+    def test_the_cost_is_zero_when_nothing_is_parked(self):
+        # No park_in means no fund to sell, so there is nothing to charge
+        # for. A cost applied regardless would silently tax every arm in
+        # the register that never asked to park.
+        out = self._run(park_cost_pct=1.0)
+        self.assertAlmostEqual(out["ending_equity"], 10000.0, places=6)
+
+    def test_the_default_is_a_real_cost_rather_than_free(self):
+        # A default of zero is a claim that the trades are free, and that
+        # claim would never be examined by anyone calling this.
+        out = self._run(park_in="SPY")
+        self.assertLess(out["ending_equity"], 10000.0)
+
+    def test_the_cost_scales_with_the_money_moved(self):
+        # Charged as a percentage of the stake, not a flat fee per trade,
+        # so doubling the position doubles the cost.
+        small = self._run(park_in="SPY", stake=1000.0, park_cost_pct=1.0)
+        big = self._run(park_in="SPY", stake=2000.0, park_cost_pct=1.0)
+        self.assertAlmostEqual(10000.0 - small["ending_equity"], 20.0, places=6)
+        self.assertAlmostEqual(10000.0 - big["ending_equity"], 40.0, places=6)
+
+    def test_an_account_that_cannot_afford_the_cost_does_not_go_negative(self):
+        # Affordability measured against the stake alone lets an account
+        # holding exactly the stake buy anyway and end up borrowing to
+        # pay the commission. Small, but this simulator is not allowed to
+        # borrow, and a negative balance would compound quietly.
+        out = portfolio_sim.simulate_fixed_capital(
+            self.TRADE, capital=1000.0, stake=1000.0, cash_yield_pct=0.0,
+            bars_by_symbol=self._bars(), park_in="SPY", park_cost_pct=1.0)
+        self.assertEqual(out["taken"], 0)
+        self.assertEqual(out["skipped"], 1)
+        self.assertGreaterEqual(out["ending_equity"], 0.0)
+
+    def test_more_trading_pays_more_to_stay_invested(self):
+        # The whole point of the measure: a high-turnover arm pays the
+        # spread more often, which is what should offset its advantage.
+        trades = [{"ticker": "AAA", "entry_date": "2020-01-06",
+                   "exit_date": "2020-02-03", "entry_price": 10.0,
+                   "return_pct": 0.0, "still_open": 0}]
+        many = [dict(t, ticker=f"T{i}") for i in range(5) for t in trades]
+        one = portfolio_sim.simulate_fixed_capital(
+            trades, capital=10000.0, stake=1000.0, cash_yield_pct=0.0,
+            bars_by_symbol=self._bars(), park_in="SPY", park_cost_pct=1.0)
+        lots = portfolio_sim.simulate_fixed_capital(
+            many, capital=10000.0, stake=1000.0, cash_yield_pct=0.0,
+            bars_by_symbol=self._bars(), park_in="SPY", park_cost_pct=1.0)
+        self.assertLess(lots["ending_equity"], one["ending_equity"])
