@@ -420,3 +420,24 @@ The whole gap problem is worth 0.16 to 0.28 points per trade. Recovering
 part of it through extended-hours exits, at 1-5% spreads, in names that
 frequently have no bid, is not worth the modelling effort — and Sharadar
 is end-of-day only, so it could not be tested rigorously anyway.
+
+## The database lives in a synced folder
+
+`data/screener.db` sits under the project, which is inside a Google
+Drive CloudStorage folder. Two consequences, one of which has already
+cost a run:
+
+- **Concurrent arms fight for the lock.** A six-band sweep died on
+  "database is locked" in its final band after four hours, because a
+  second backtest was started while it ran. Five of six bands survived;
+  the sixth was partial and had to be discarded. The connection timeout
+  is now 60 seconds rather than Python's default 5.
+- **Every trade is its own write transaction.** `insert_backtest_trade`
+  does a DELETE then an INSERT per trade, so a 40,000-trade arm is
+  80,000 transactions against a file the sync client is uploading
+  underneath them. `SCREENER_DB` now redirects the path, so a long run
+  writes to local disk and `merge_backtest_trades` folds it back.
+
+Neither is fixed properly. The real fix is either moving the database
+out of the synced tree or batching the inserts into one transaction per
+arm, and the second is the better one.
