@@ -3173,3 +3173,47 @@ churn" from "the band removed a third of the universe and any third
 would have done". That control exists for universe C and was decisive
 there; it has not been run here, and this is the universe where it
 matters.
+
+---
+
+## W2b — was any of it ever significant?
+
+W2 compared point estimates. This asks whether either side of that
+comparison was distinguishable from noise.
+
+**The first version of this test asked the wrong question.** I computed
+`t = Sharpe x sqrt(years)` on the account's raw return, which for an
+always-parked account is mostly a test of whether SPY beat zero. The
+question is whether the strategy beats the *index*, so the statistic has
+to be the information ratio on active return — strategy minus benchmark,
+period by period.
+
+| window | rule | universe | CAGR | IR | active t |
+|---|---|---|---|---|---|
+| 2021-2026 | R20 | survivor-biased | +16.21% | 0.17 | 0.43 |
+| 2021-2026 | R20 | corrected | +12.09% | 0.10 | 0.25 |
+| 2021-2026 | M9 | survivor-biased | +23.70% | 0.43 | 1.07 |
+| 2021-2026 | M9 | corrected | +4.35% | -0.70 | **-1.66** |
+| 2010-2020 | R20 | survivor-biased | +15.54% | 0.27 | 0.96 |
+| 2010-2020 | R20 | corrected | +7.02% | -0.30 | **-1.07** |
+
+### Nothing cleared 2.0, before or after
+
+The +11.55% over buy-and-hold that W2 was written to investigate had an
+active t of **1.07**. It was noise before the universe was corrected.
+The correction did not destroy a real edge; it moved a point estimate
+from positive-and-insignificant to negative-and-insignificant.
+
+This tempers W2's own write-up. I called that result decisive. It is
+decisive about the point estimate — the sign flips consistently across
+all three arms — and it is not decisive about anything statistical,
+because neither side reaches a conventional bar. The defensible sentence
+is: **no window tested in this project has ever shown a statistically
+significant edge over the index**, and correcting the universe removed
+even the appearance of one.
+
+Worth noting the corrected underperformance is not significant either.
+"This loses to the index" is a direction supported by three of three
+arms, not a measured quantity. What would settle it is more windows, and
+the honest reading of a t of -1.66 across five years is that five years
+cannot settle it.
