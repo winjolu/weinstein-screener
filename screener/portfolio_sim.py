@@ -439,6 +439,7 @@ def _stake_for(trade, capital, base_stake, risk_pct, max_stake):
 
 def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
                             cash_yield_pct=0.0, priority=None, bars_by_symbol=None,
+                            park_in=None, park_when=None,
                             risk_pct=None, max_stake=None):
     """What a real account with a fixed amount of money would have done.
 
@@ -550,13 +551,33 @@ def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
     elapsed_days = 0
     last_when = events[0][0]
     rate = cash_yield_pct / 100.0
+    # Idle capital can sit in cash or in an index fund, and which is
+    # right depends on why it is idle. When the market gate is off — the
+    # 2008 case the gate exists for — cash is correct and the index is
+    # exactly what is being avoided. When the gate is on and there is
+    # simply nothing to buy, cash is a choice to earn 3% while the index
+    # earns 15%, which the old model quietly credited as prudence.
+    #
+    # `park_in` names the fund; `park_when(date)` decides, returning True
+    # when parking is allowed. Without park_when the fund is used
+    # whenever cash is idle, which is the naive policy and usually wrong.
+    park_index = None
+    if park_in and bars_by_symbol and park_in in bars_by_symbol:
+        park_index = _price_index({park_in: bars_by_symbol[park_in]})
 
     for when, _order, kind, trade in events:
         days = (when - last_when).days
         if days:
             deployed_day_dollars += open_count * stake * days
             elapsed_days += days
-            if rate:
+            if park_index is not None and (park_when is None or park_when(last_when)):
+                a = _price_as_of(park_index, park_in, last_when.isoformat())
+                b = _price_as_of(park_index, park_in, when.isoformat())
+                if a and b and a > 0:
+                    earned = cash * (b / a - 1)
+                    cash += earned
+                    interest += earned
+            elif rate:
                 earned = cash * rate * days / 365.25
                 cash += earned
                 interest += earned

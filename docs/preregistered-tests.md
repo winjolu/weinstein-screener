@@ -2962,3 +2962,43 @@ pays. That evidence lives entirely in the names this universe excludes.
 
 **T5b re-runs on universe B with bands extended to 30%**, since the
 curve had not turned. Nothing here should be believed until it lands.
+
+---
+
+## T4 result — idle capital, and a window that cannot answer the question
+
+`simulate_fixed_capital` now takes `park_in` (a fund to hold while cash
+is idle) and `park_when` (a predicate deciding when parking is allowed).
+The policy tested: gate off means cash, gate on with no signals means
+SPY.
+
+2005-2009, $100,000 account, cash credited 3%:
+
+| arm | cash only | always SPY | SPY when gate on |
+|---|---|---|---|
+| M9 | **+3.88%** | +2.33% | +3.42% |
+| R20 | +4.01% | +3.45% | **+5.31%** |
+
+Regime-aware parking helps R20 by 1.30 points and costs M9 0.46. The
+mechanism is legible: R20 takes 4,384 trades and leaves capital idle, so
+parking it matters; M9 takes 39,205 and is mostly deployed whenever the
+gate is on, so there is little left to park.
+
+### This window cannot decide the question, and I ran it anyway
+
+Over 2005-2009 SPY returned +0.99%/yr while cash was credited 3%. **Cash
+beat the index by two points**, so "hold the index rather than cash" was
+never going to look good here. Testing a parking policy only in the one
+window where the index underperformed cash is close to meaningless, and
+that was foreseeable before running it rather than after.
+
+The windows that matter are 2010-2020 and 2021-2026, where the index
+returned 13.61% and 11.78% against cash near zero. If parking does not
+win there it is dead; this result says nothing either way.
+
+### The cash rate is an anachronism of the same kind as the commissions
+A flat 3% is wrong in both directions across this window: short rates
+were near 5% in 2005-2007 and near 0.2% by 2009. It flatters cash early
+and penalises it late. Wanted: a rate series rather than a constant,
+which is the same fix as the era-aware broker profile and should be done
+alongside it.
