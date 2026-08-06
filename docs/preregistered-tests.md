@@ -2901,3 +2901,64 @@ signals, which is common given deployment runs 57-88%.
 Policy to test: gate off means cash, gate on with no signals means SPY.
 Also corrects a way the current model flatters us, crediting 3-4% on
 idle cash through periods when the index returned 15%.
+
+---
+
+## T5 — the buy/hold spread, and what it actually does
+
+Novy-Marx & Velikov call a buy/hold spread "the single most effective
+simple cost mitigation strategy": require more to establish a position
+than to maintain one. M9 used the same test for both, so a marginal
+signal churned positions in and out.
+
+Implemented as an entry band — price must exceed its moving average by
+the band before entering, while the exit is unchanged. Universe C,
+2005-2009.
+
+| entry band | trades | mean | return | Martin | t |
+|---|---|---|---|---|---|
+| 0% (current) | 15,445 | +0.74% | +2.27% | 0.29 | 0.70 |
+| 2% | 10,626 | +1.15% | +3.87% | 0.41 | 1.08 |
+| 5% | 7,447 | +1.72% | +4.45% | 0.51 | 1.17 |
+| 10% | 4,962 | +2.17% | +5.20% | 0.70 | 1.23 |
+| 15% | 3,405 | +2.51% | **+6.77%** | **0.82** | **1.50** |
+
+Monotonic on mean trade, annual return, Martin ratio and t-statistic
+simultaneously. Still climbing at 15%, so the peak is not found.
+
+### The mechanism, tested rather than assumed
+
+Two explanations predict different things. A genuine buy/hold spread
+cuts **repeat entries per ticker**. Momentum selection — which batch 8
+already established is real — would instead pick **different tickers**
+with similar repeat rates.
+
+| band | tickers | entries per ticker | tickers entered 3+ times |
+|---|---|---|---|
+| 0% | 1,222 | **12.64** | 98.9% |
+| 5% | 1,220 | 6.10 | 96.6% |
+| 15% | 1,139 | **2.99** | 59.7% |
+
+**Ticker count falls 7%; entries per ticker fall 76%.** The band trades
+the same stocks far fewer times, which is whipsaw reduction and not
+selection. I had argued this was probably momentum wearing different
+clothes. It is not, and the test was cheap.
+
+**12.64 entries per ticker at band zero** is the finding underneath the
+finding. Over five years the strategy bought the same 1,222 names an
+average of twelve times each. That is the churn LPHIQ's six attempts
+were an instance of, not an outlier.
+
+### Why this is not yet believable
+
+Universe C excludes delisted names, and the validation cases —
+LPHIQ +559.8% after five failed attempts, FRPT1 +693.1% after three,
+VPHM +385.3% after one — are **all delisted**. They were never
+candidates, so the check that matters could not run.
+
+The band works by removing 78% of entries. The whole question is
+whether it removes the failed attempts while keeping the sixth one that
+pays. That evidence lives entirely in the names this universe excludes.
+
+**T5b re-runs on universe B with bands extended to 30%**, since the
+curve had not turned. Nothing here should be believed until it lands.
