@@ -1,6 +1,6 @@
 # Where this stands
 
-Current state of belief, as of 2026-08-03. `preregistered-tests.md` is
+Current state of belief, as of 2026-08-06. `preregistered-tests.md` is
 the audit trail and records tests in the order they were run, including
 the ones I got wrong and withdrew. This is the summary that sits on top
 of it.
@@ -17,10 +17,16 @@ become a test of it. The nine-condition checklist is dominated: a
 two-line trend rule plus a market-regime filter beats it on
 risk-adjusted terms in every window tested. The method's real
 contribution turns out to be one thing — staying out of a falling market
-— and it does that well. Nothing built here clears the significance bar
-the literature applies to work that has looked at the data this many
-times, and the survivorship correction has not yet been measured. **No
-money should be committed on the strength of anything in this
+— and it does that well.
+
+**Survivorship has now been measured, and it was carrying the result.**
+On point-in-time universes the advantage over buying the index survives
+only in the window containing the crash. Across the 2010s and the
+post-2021 recovery the strategy loses to the index by six to eight
+points a year. What is left is not an edge but insurance: premiums paid
+in good years against a payout in the bad one. That may still be worth
+owning, and it is a different thing from what this project set out to
+find. **No money should be committed on the strength of anything in this
 repository.**
 
 ---
@@ -83,19 +89,38 @@ sitting in cash and buying the recovery by six points a year in the one
 window built to favour it, before borrow costs that are highest on
 exactly the names that look most attractive.
 
-**"Survivorship bias inflates our results."** Not supported. 60% of the
-companies missing from our universe were acquired rather than failed,
-and acquisitions usually left at a premium. The direction of the
-correction is genuinely unknown.
+**"Survivorship bias does not inflate our results."** Refuted, and it
+was my claim. The acquisition reasoning was sound and the conclusion was
+still wrong: 60% of the missing companies were acquired, acquisitions
+usually leave at a premium, and correcting the universe *still* removed
+the entire advantage over the index in both bull windows. R20 over
+2010-2020 goes from +1.77% over buy-and-hold to -6.75%; M9 over
+2021-2026 from +11.55% to -7.80%, a nineteen-point swing. I had flagged
+that +11.55% as probably an artifact, which is the only part of this I
+got right.
+
+One qualification, which is a real one and not a hedge: the corrected
+universes are also 3.3x larger, because point-in-time construction adds
+the small names the old universe never contained as well as the dead
+ones. Part of the collapse may be trading names too illiquid to trade.
+The liquidity-filtered arm that separates these is running.
 
 ## What is unresolved, in order of how much it matters
 
-**1. Survivorship, which can invert everything.** The hole is the same
-order of magnitude as the sample — 2,805 companies delisted and absent
-from a 1,257-name holdout universe. Injecting phantom total losses shows
-that **2% of trades going to zero erases the advantage over the index in
-two windows of three.** The Sharadar client is built and tested; this
-runs as soon as the subscription is live.
+**1. Whether anything survives the correction.** Survivorship is no
+longer unresolved — it was measured and it inverted the result, exactly
+as the phantom-loss injection predicted it would. What is unresolved is
+whether a liquidity floor recovers any of it, or whether the method
+simply does not beat the index outside a crash. Those are very different
+outcomes and the arm deciding between them is running.
+
+**1b. What idle capital does, which outweighs everything above.**
+Holding the index rather than cash between positions is worth three to
+six points a year. The entire strategy edge, at its most generous, was
+worth about one. Roughly 200 arms have gone into tuning entry rules
+while the largest lever in the system sat unregistered as a default —
+and under cash-only the same trades that beat the index in the 2010s
+lose to it.
 
 **2. Statistical significance.** Harvey, Liu and Zhu (2016) argue a new
 factor needs t > 3.0 rather than 2.0, because hundreds have been tried
