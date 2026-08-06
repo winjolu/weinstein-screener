@@ -439,7 +439,7 @@ def _stake_for(trade, capital, base_stake, risk_pct, max_stake):
 
 def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
                             cash_yield_pct=0.0, priority=None, bars_by_symbol=None,
-                            park_in=None, park_when=None,
+                            park_in=None, park_when=None, park_cost_pct=0.11,
                             risk_pct=None, max_stake=None):
     """What a real account with a fixed amount of money would have done.
 
@@ -561,6 +561,17 @@ def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
     # `park_in` names the fund; `park_when(date)` decides, returning True
     # when parking is allowed. Without park_when the fund is used
     # whenever cash is idle, which is the naive policy and usually wrong.
+    #
+    # Parking is not free, and modelling it as pure accrual on cash was
+    # flattering by about a point a year on the busiest arm. Holding the
+    # fund means every stock entry sells some of it and every exit buys
+    # it back: two real transactions per position, on top of the stock's
+    # own costs. park_cost_pct charges each leg as a percentage of the
+    # money moved, defaulting to 0.11% — $1 commission plus a basis
+    # point of spread on a $1,000 stake, which is what the cheapest
+    # broker actually charges on a liquid ETF. It defaults to a real
+    # number rather than zero because a default of zero is a claim that
+    # the trades are free, and that claim would go unexamined.
     park_index = None
     if park_in and bars_by_symbol and park_in in bars_by_symbol:
         park_index = _price_index({park_in: bars_by_symbol[park_in]})
@@ -583,11 +594,20 @@ def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
                 interest += earned
             last_when = when
 
+        # Whether the account is in the fund *at this moment* decides
+        # whether a transaction in it happens at all. Charging the cost
+        # whenever park_in is merely configured bills a policy that
+        # declined to park for trades it never made.
+        parking_now = park_index is not None and (
+            park_when is None or park_when(when))
+
         if kind == "exit":
             if trade.get("_funded"):
                 committed = trade.get("_stake", stake)
                 proceeds = committed * (1 + trade["return_pct"] / 100.0)
                 cash += proceeds
+                if parking_now and park_cost_pct:
+                    cash -= proceeds * park_cost_pct / 100.0
                 realised += proceeds - committed
                 open_count -= 1
                 curve.append((when, cash + open_count * committed))
@@ -599,12 +619,21 @@ def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
                 ledger.append((when, cash, dict(held)))
         else:
             want = _stake_for(trade, capital, stake, risk_pct, max_stake)
-            if want <= 0 or cash < want:
+            # The cost of getting out of the parked fund is part of what
+            # the position costs. Checking affordability against `want`
+            # alone lets an account holding exactly `want` buy anyway and
+            # end up with negative cash — small, but it is a borrowing
+            # this simulator is not supposed to permit.
+            needed = want * (1 + (park_cost_pct / 100.0
+                                  if parking_now and park_cost_pct else 0.0))
+            if want <= 0 or cash < needed:
                 trade["_funded"] = False
                 skipped += 1
                 continue
             trade["_stake"] = want
             cash -= want
+            if parking_now and park_cost_pct:
+                cash -= want * park_cost_pct / 100.0
             open_count += 1
             peak_open = max(peak_open, open_count)
             trade["_funded"] = True

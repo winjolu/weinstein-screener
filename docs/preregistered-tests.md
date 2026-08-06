@@ -3002,3 +3002,60 @@ were near 5% in 2005-2007 and near 0.2% by 2009. It flatters cash early
 and penalises it late. Wanted: a rate series rather than a constant,
 which is the same fix as the era-aware broker profile and should be done
 alongside it.
+
+### T4 across all three windows, with parking costs charged
+
+| window | universe | arm | cash | always | gated | B&H |
+|---|---|---|---|---|---|---|
+| 2005-2009 | corrected B | M9 | **+3.88%** | +1.78% | +2.90% | +0.99% |
+| 2005-2009 | corrected B | R20 | +4.01% | +2.07% | **+4.49%** | +0.99% |
+| 2010-2020 | survivor-biased | M9 | +10.95% | **+15.01%** | +11.98% | +13.77% |
+| 2010-2020 | survivor-biased | R20 | +10.57% | **+15.54%** | +11.65% | +13.77% |
+| 2021-2026 | survivor-biased | M9 | +18.61% | **+23.70%** | +20.16% | +12.15% |
+| 2021-2026 | survivor-biased | R20 | +10.96% | **+16.21%** | +13.86% | +12.15% |
+
+Always parking wins four of six. The regime-aware policy I designed
+wins one. The clever idea lost to the dumb one, and the gate only earns
+its keep in 2005-2009 — the sole window where sitting out was worth
+anything.
+
+### The policy is worth more than the strategy
+
+Under cash-only, M9 and R20 *lose* to buy-and-hold in 2010-2020 by 2.82
+and 3.20 points. Under always-parked they *beat* it by 1.24 and 1.77.
+Same trades, same signals: the sign of the result is set by what idle
+cash does.
+
+The choice is worth 3-6 points a year. The strategy edge is worth about
+one. Roughly 200 arms have been spent tuning entry rules that move the
+headline by fractions of a point, while an unexamined default — cash
+credited at a flat 3% — was quietly worth several times all of it. The
+most consequential parameter in the system was one I had never
+registered as a parameter.
+
+### Two corrections to the first reading of this table
+
+**"The only clean window gives the smallest edge" was wrong.** It came
+from reading the always-parked column alone. Best-policy-per-window puts
+2005-2009 at +2.89 and +3.50 over buy-and-hold, ahead of 2010-2020.
+
+**But best-of-three is a selection.** Choosing the winning policy after
+seeing the results inflates exactly as choosing the best entry rule from
+200 does. Fixing one policy in advance — always-parked, which wins four
+of six — gives the honest figures: **+0.79 and +1.08** in the clean
+window, **+1.24 and +1.77** in 2010-2020, and +11.55 and +4.06 in
+2021-2026. The defensible claim is one to two points a year, not the
+headline.
+
+### What still needs doing before any of this counts
+- **2010-2020 and 2021-2026 run on the survivor-biased Webull universes**,
+  which cost R20 47% of its return when corrected. The +11.55 is an
+  artifact until re-run on Sharadar. The reversal between windows is
+  confounded with a change of data source.
+- **Parking friction is now charged** at 0.11% a leg — $1 plus a basis
+  point of spread on a $1,000 stake — because modelling it as pure
+  accrual was worth about a point a year on the busiest arm. It is
+  charged only when the account is actually in the fund, so a policy
+  that declines to park is not billed for trades it never made.
+- **The flat cash rate remains an anachronism.** Wanted alongside the
+  era-aware broker profile.
