@@ -3110,3 +3110,49 @@ missed, C restricts to names that still exist. The missing arm is a
 liquidity-filtered universe (dollar volume floor at the point of entry),
 run against both. Until that exists, "the strategy loses to buy-and-hold
 in bull markets" is supported and "the method does not work" is not.
+
+---
+
+## T5b — the buy/hold spread on universe B
+
+T5 ran on universe C and concluded the entry band cuts whipsaw rather
+than selecting momentum, because entries per ticker fell 76% while the
+ticker count fell only 7%. Universe B adds the companies that died,
+which is where the multi-attempt names live (LPHIQ took five failed
+entries before the sixth returned +559.8%).
+
+2005-2009, $100k, always-parked. Buy and hold SPY: +0.99%/yr.
+
+| band | trades | tickers | entries/ticker | win% | median% | CAGR | vs B&H |
+|---|---|---|---|---|---|---|---|
+| 0% | 39,205 | 3,723 | 10.53 | 18.2 | -1.72 | +1.78% | +0.79% |
+| 10% | 13,533 | 3,656 | 3.70 | 33.4 | -6.26 | +1.92% | +0.93% |
+| 15% | 9,648 | 3,476 | 2.78 | 35.4 | -6.37 | +1.68% | +0.69% |
+| 20% | 6,826 | 3,082 | 2.21 | 36.9 | -6.47 | +4.51% | +3.52% |
+| 25% | 4,904 | 2,617 | 1.87 | 38.1 | -6.91 | +4.46% | +3.47% |
+
+Band 30 is missing: the sweep died on a database lock in its final band
+and the partial rows were discarded rather than read. It is re-running.
+
+### The mechanism survives, but weaker than T5 claimed
+
+Entries per ticker fall 82% while the ticker count falls 30%. Churn is
+still shed far faster than names, so the dominant effect is still the
+dead space rather than selection — but on universe C the ticker count
+fell **7%**, and 30% is a different claim. The band is dropping nearly a
+third of the names outright.
+
+The distribution is the part that reads cleanly as whipsaw. At band 0
+the median trade loses 1.72% on an 18% win rate: a mass of tiny
+stopped-out positions, which is what churn looks like from the inside.
+At band 25 the win rate doubles to 38% while the median loss deepens,
+because the small-loss churn has gone and what is left are positions
+that had room to move.
+
+**Wanted before this is believed:** the random-thinning control, re-run
+on universe B. Removing 30% of names at random and seeing what it does
+to the same figures is the only thing that separates "the band removed
+churn" from "the band removed a third of the universe and any third
+would have done". That control exists for universe C and was decisive
+there; it has not been run here, and this is the universe where it
+matters.
