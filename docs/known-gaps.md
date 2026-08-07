@@ -449,3 +449,33 @@ differed by one, because a backtest still had the file open — so the
 move was deferred behind the running arms and repeated once they
 finished. The remaining half of this gap is real: inserts are still one
 transaction per trade.
+
+## Sharadar's fund `closeadj` is broken for distribution-heavy ETFs
+
+Found while running a live screen, not by a test. FTHI ranked third in
+the market on twelve-month momentum with a return of **7,946,566%**. Its
+adjusted close a year earlier is recorded as $0.0003 against a real
+price of $23.00 — the dividend adjustment has been divided toward zero.
+FTSL and FTSM are the same. Seventy funds fail the check.
+
+Stocks are unaffected: `prices` behaves correctly on every name tested.
+
+The separator is drift in `closeadj/close` across the window. Healthy
+series move a few percent; broken ones move by four or five orders of
+magnitude. `tests/test_adjustment_integrity.py` pins both sides,
+including the named broken funds — if Sharadar repairs them that test
+fails, which is correct, because loosening the gate should be a
+deliberate decision.
+
+**Not fixed, only detected.** Any screen touching `fundprices` must
+apply the drift gate or it will rank corrupt series at the top. Nothing
+enforces that yet outside the scratch scripts.
+
+## Splits are adjusted; 3% of cases warrant a look
+
+639 splits since 2015 checked by comparing the close either side.
+**96.6% show a ratio near 1**, meaning the series is adjusted. The 22
+that do not are *not* unadjusted — none of them match their own split
+factor, and several show large falls where an unadjusted reverse split
+would show a rise. They are distressed microcaps that collapsed
+immediately after reverse-splitting, which is a real price move.
