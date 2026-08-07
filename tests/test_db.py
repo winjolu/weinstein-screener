@@ -343,3 +343,37 @@ class MergeBacktestTradesTest(unittest.TestCase):
         self.assertAlmostEqual(row["return_pct"], 10.0)
         self.assertEqual(row["parameter_set"], "x1")
         conn.close()
+
+
+class DefaultPathTest(unittest.TestCase):
+    """Where the database lives when nobody says.
+
+    It moved out of the project directory because the project directory
+    is inside a folder a sync client uploads, and a 200MB file rewritten
+    thousands of times per backtest is the worst possible thing to put
+    there.
+    """
+
+    def test_the_default_is_outside_the_project_tree(self):
+        project = os.path.dirname(os.path.dirname(os.path.abspath(db.__file__)))
+        self.assertFalse(db._default_db_path().startswith(project))
+
+    def test_the_default_is_not_inside_a_synced_folder(self):
+        # The specific failure being prevented, named rather than implied.
+        path = db._default_db_path()
+        self.assertNotIn("CloudStorage", path)
+        self.assertNotIn("Google Drive", path)
+
+    def test_the_environment_variable_wins(self):
+        prev = os.environ.get("SCREENER_DB")
+        os.environ["SCREENER_DB"] = "/tmp/some-side.db"
+        try:
+            import importlib
+            reloaded = importlib.reload(db)
+            self.assertEqual(reloaded.DB_PATH, "/tmp/some-side.db")
+        finally:
+            if prev is None:
+                os.environ.pop("SCREENER_DB", None)
+            else:
+                os.environ["SCREENER_DB"] = prev
+            importlib.reload(db)

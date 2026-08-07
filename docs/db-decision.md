@@ -4,7 +4,7 @@ screener's numeric thresholds and what evidence each one rests on.
 # Database Choice: SQLite (not hosted Postgres/Supabase)
 
 ## Decision
-This project uses SQLite (data/screener.db, gitignored, local-only),
+This project uses SQLite (in application support, local-only),
 not a hosted database service like Supabase or managed Postgres.
 
 ## Why
