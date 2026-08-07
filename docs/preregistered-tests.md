@@ -3294,3 +3294,78 @@ the replacement changes a sign — M9 over 2005-2009 was reported at
 +1.78% always-parked, beating buy-and-hold by 0.79 points. It is
 actually **-0.24%, losing by 1.23**. The one window where the untuned
 rule appeared to win, it does not.
+
+---
+
+## T3 — daily bars are worse, and that is operationally good news
+
+Weekly bars are Weinstein's medium because that is what a chartist could
+maintain by hand, not because anything established weekly as the right
+sampling rate. Universe C, same window, same rule, only the bar interval
+changed. Buy and hold: +0.99%/yr.
+
+| days | trades | CAGR | vs B&H |
+|---|---|---|---|
+| 20 | 27,206 | -2.52% | -3.52% |
+| 50 | 26,371 | -3.55% | -4.54% |
+| 100 | 35,979 | -1.64% | -2.63% |
+| 150 | 45,717 | -2.64% | -3.63% |
+| 200 | 53,395 | -2.97% | -3.96% |
+
+Every daily arm loses to the index, and every one is worse than its
+weekly equivalent. The 150-day arm is the same rule as `t1_ma30` at a
+different sampling rate and is **2.65 points worse**.
+
+The mechanism is churn. A trailing stop checked on daily bars is tested
+five times as often as one checked weekly, so positions are stopped out
+sooner and re-entered more: 45,717 trades against 15,445 for the same
+rule. That is the whipsaw T5 measured, arriving through the sampling
+rate instead of the entry threshold.
+
+**Practically: watching this more closely makes it worse.** For someone
+who cannot sit in front of screens, that is the useful direction for
+this result to point.
+
+### The control I designed could not have worked
+`t3_d150` was supposed to reproduce `t1_ma30`'s 15,445 trades as a units
+check. It returned 45,717, and I nearly read that as a scaling bug —
+but a daily stop genuinely fires more often, so the counts *should*
+differ and the control cannot separate "units wrong" from "daily churns
+more". Both predict more trades.
+
+The right check compares the averages themselves: across 400 names the
+150-day and 30-week averages differ by a median of **0.55%**, with all
+400 inside 5%. The units are correct; the difference is real.
+
+### Weekly, shorter is better
+For comparison, on weekly bars: 5 weeks +0.67% over the index, 10 weeks
++1.63%, 20 weeks -0.54%, 30 weeks -0.98%, 40 weeks -2.52%. The canonical
+30 is fourth of six, and the two shortest are the only ones that beat
+buying the index.
+
+---
+
+## T5c — the entry band has a real mechanism
+
+The control T5b needed. Band 25 finished on 2,617 of band 0's 3,723
+names, so: take the band-0 rule unchanged, thin the universe at random
+to 2,617, and see whether the improvement follows the *count* or the
+*rule*. Three seeds.
+
+| arm | trades | CAGR | vs B&H |
+|---|---|---|---|
+| random thin, seed 1 | 26,563 | +0.52% | -0.47% |
+| random thin, seed 2 | 26,656 | +0.58% | -0.41% |
+| random thin, seed 3 | 26,812 | -0.20% | -1.19% |
+| **band 0**, all 3,723 names | 39,205 | **+1.78%** | +0.79% |
+| **band 25**, 2,617 names | 4,904 | **+4.46%** | +3.47% |
+
+**Removing 30% of the names at random makes it worse** — +1.78% falls to
++0.30% on average. Removing the same proportion *via the entry band*
+makes it better, +1.78% to +4.46%. The three seeds span 0.78 points, so
+the control is tight enough to carry the comparison.
+
+This vindicates T5b's mechanism, which the ticker-count fall had put in
+doubt. The band is not merely reducing participation; participation
+reduction on its own costs about 1.5 points, and the band gains 2.7. It
+is the one finding tonight that survived its own control.
