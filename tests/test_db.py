@@ -377,3 +377,52 @@ class DefaultPathTest(unittest.TestCase):
             else:
                 os.environ["SCREENER_DB"] = prev
             importlib.reload(db)
+
+
+class IndicatorReadingsTest(unittest.TestCase):
+    """Recording a black box's output so it can be falsified later.
+
+    A protected indicator cannot be reimplemented and run over history.
+    Writing the reading down before the outcome is the only test left,
+    and it is only worth anything if the record is exact and cannot be
+    quietly revised after the fact.
+    """
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self._prev = db.DB_PATH
+        db.DB_PATH = os.path.join(self._dir.name, "t.db")
+        db._schema_ready_for = None
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        db.DB_PATH = self._prev
+        db._schema_ready_for = None
+
+    def test_a_reading_round_trips(self):
+        db.save_indicator_reading("AAPL", "SATA", 8, observed_on="2026-08-07",
+                                  price=230.0, note="weekly chart")
+        rows = db.get_indicator_readings("SATA")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["ticker"], "AAPL")
+        self.assertAlmostEqual(rows[0]["score"], 8.0)
+        self.assertEqual(rows[0]["observed_by"], "manual")
+
+    def test_rereading_the_same_chart_corrects_rather_than_duplicates(self):
+        db.save_indicator_reading("AAPL", "SATA", 8, observed_on="2026-08-07")
+        db.save_indicator_reading("AAPL", "SATA", 7, observed_on="2026-08-07")
+        rows = db.get_indicator_readings("SATA")
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows[0]["score"], 7.0)
+
+    def test_different_days_are_separate_observations(self):
+        db.save_indicator_reading("AAPL", "SATA", 8, observed_on="2026-08-07")
+        db.save_indicator_reading("AAPL", "SATA", 5, observed_on="2026-09-07")
+        self.assertEqual(len(db.get_indicator_readings("SATA")), 2)
+
+    def test_indicators_do_not_collide(self):
+        db.save_indicator_reading("AAPL", "SATA", 8, observed_on="2026-08-07")
+        db.save_indicator_reading("AAPL", "OTHER", 2, observed_on="2026-08-07")
+        self.assertEqual(len(db.get_indicator_readings("SATA")), 1)
+        self.assertEqual(len(db.get_indicator_readings()), 2)
