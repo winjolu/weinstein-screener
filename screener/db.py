@@ -184,6 +184,34 @@ CREATE TABLE IF NOT EXISTS recommendations (
     PRIMARY KEY (ticker, suggested_on, action)
 );
 
+-- Readings from a third-party indicator whose source I cannot see.
+--
+-- SATA (Stage Analysis Technical Attributes) is an invite-only
+-- TradingView script: a 0-10 count of Weinstein attributes across
+-- price, volume, relative strength and overhead resistance. The claim
+-- worth testing is that scores above ~6 precede rises and below ~4
+-- precede falls.
+--
+-- The source is protected, so it cannot be reimplemented and checked
+-- against history. That leaves exactly one honest test: write the score
+-- down today, before the outcome, and score it forward. A black box can
+-- still be falsified, it just has to be done prospectively and it costs
+-- calendar time rather than compute.
+--
+-- Scores are read off a chart by hand, so `observed_by` records that
+-- they are an observation rather than a computation. Nothing here is
+-- derived from the protected script's code.
+CREATE TABLE IF NOT EXISTS indicator_readings (
+    ticker TEXT NOT NULL,
+    observed_on TEXT NOT NULL,
+    indicator TEXT NOT NULL,
+    score REAL,
+    price REAL,
+    note TEXT,
+    observed_by TEXT,
+    PRIMARY KEY (ticker, observed_on, indicator)
+);
+
 CREATE TABLE IF NOT EXISTS backtest_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker TEXT NOT NULL,
@@ -823,5 +851,41 @@ def merge_backtest_trades(source_path, db_path=None):
         conn.commit()
         conn.execute("DETACH DATABASE src")
         return after - before
+    finally:
+        conn.close()
+
+
+def save_indicator_reading(ticker, indicator, score, observed_on=None,
+                           price=None, note=None, observed_by="manual"):
+    """Record a third-party indicator's value, before the outcome is known.
+
+    Replaces on the same ticker/date/indicator so re-reading a chart
+    corrects rather than duplicates.
+    """
+    conn = _connect()
+    try:
+        conn.execute(
+            """INSERT OR REPLACE INTO indicator_readings
+               (ticker, observed_on, indicator, score, price, note, observed_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (ticker.upper(), observed_on or datetime.date.today().isoformat(),
+             indicator, score, price, note, observed_by))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_indicator_readings(indicator=None):
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        if indicator:
+            rows = conn.execute(
+                "SELECT * FROM indicator_readings WHERE indicator = ? "
+                "ORDER BY observed_on, ticker", (indicator,)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM indicator_readings ORDER BY observed_on, ticker").fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
