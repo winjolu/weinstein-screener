@@ -10,14 +10,6 @@ import json
 import os
 import sqlite3
 
-# The default sits under the project, which on this machine is inside a
-# folder a sync client watches. That is fine for the screener's own runs
-# and bad for a backtest: every trade is its own DELETE+INSERT, so a
-# 40,000-trade arm is 80,000 write transactions handed to a filesystem
-# that is uploading the file underneath them. Pointing SCREENER_DB at
-# local disk for a long run and merging afterwards is far faster, and it
-# lets two arms run at once without fighting for the same lock — which
-# has already cost me a four-hour sweep.
 def _default_db_path():
     """Application support, not the project directory.
 
