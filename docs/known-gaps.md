@@ -441,3 +441,11 @@ cost a run:
 Neither is fixed properly. The real fix is either moving the database
 out of the synced tree or batching the inserts into one transaction per
 arm, and the second is the better one.
+
+**Update 2026-08-06:** the database has been moved to
+`~/Library/Application Support/weinstein-screener/screener.db`. The
+first attempt to copy it failed its own verification — row counts
+differed by one, because a backtest still had the file open — so the
+move was deferred behind the running arms and repeated once they
+finished. The remaining half of this gap is real: inserts are still one
+transaction per trade.

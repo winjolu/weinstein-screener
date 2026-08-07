@@ -1,7 +1,9 @@
 """SQLite storage for screener run results and the ticker watchlist.
 
-I keep the database at data/screener.db, which is already gitignored via
-data/* — nothing here ever needs to touch git.
+The database lives in application support, not under the project. It was
+at data/screener.db until a 200MB file rewritten thousands of times per
+backtest met the sync client watching that folder. SCREENER_DB overrides
+the location; merge_backtest_trades brings a side database home.
 """
 import datetime
 import json
@@ -16,9 +18,34 @@ import sqlite3
 # local disk for a long run and merging afterwards is far faster, and it
 # lets two arms run at once without fighting for the same lock — which
 # has already cost me a four-hour sweep.
-DB_PATH = os.environ.get("SCREENER_DB") or os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "screener.db"
-)
+def _default_db_path():
+    """Application support, not the project directory.
+
+    It used to live at data/screener.db, which put a 200MB database that
+    is rewritten thousands of times per backtest inside a folder Google
+    Drive continuously uploads. That cost a four-hour run to a lock
+    timeout and roughly tripled every arm's runtime.
+
+    Falls back to the old location if application support cannot be
+    created, because a screener that refuses to start over a directory
+    is worse than one writing somewhere imperfect.
+    """
+    home = os.path.expanduser("~")
+    candidate = os.path.join(home, "Library", "Application Support",
+                             "weinstein-screener")
+    try:
+        os.makedirs(candidate, exist_ok=True)
+        return os.path.join(candidate, "screener.db")
+    except OSError:
+        return os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "data", "screener.db")
+
+
+# SCREENER_DB overrides, which is what a long backtest uses to write to
+# its own file and merge afterwards — two arms sharing one database has
+# already killed a run.
+DB_PATH = os.environ.get("SCREENER_DB") or _default_db_path()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS screener_results (
