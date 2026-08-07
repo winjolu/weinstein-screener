@@ -3217,3 +3217,80 @@ Worth noting the corrected underperformance is not significant either.
 arms, not a measured quantity. What would settle it is more windows, and
 the honest reading of a t of -1.66 across five years is that five years
 cannot settle it.
+
+---
+
+## W3 — the liquidity filter does not rescue it
+
+W2 left one way out: the corrected universes are 3.3x larger and include
+thousands of names too small to trade, so the collapse might have been
+microcaps rather than survivorship. This restricts the corrected
+universe to names with median dollar volume above $1M a day over the
+year *before* the window opens.
+
+All figures always-parked, costs charged, active t against SPY.
+
+| window | rule | universe | trades | CAGR | B&H | edge | maxDD | t |
+|---|---|---|---|---|---|---|---|---|
+| 2005 | R20 | all names | 5,670 | +4.57% | +0.99% | +3.58% | -45.8% | -0.05 |
+| 2005 | M9 | all names | 45,899 | -0.24% | +0.99% | -1.23% | -35.3% | -0.43 |
+| 2010 | R20 | all names | 7,885 | +7.02% | +13.77% | -6.75% | -43.6% | -1.07 |
+| 2010 | M9 | all names | 89,070 | +12.82% | +13.77% | -0.95% | -27.7% | 0.25 |
+| 2010 | R20 | liquid only | 2,878 | +14.67% | +13.77% | +0.91% | -32.2% | 0.29 |
+| 2010 | M9 | liquid only | 51,823 | +11.28% | +13.77% | -2.49% | -29.1% | -0.25 |
+| 2021 | R20 | all names | 6,225 | +12.09% | +12.15% | -0.06% | -55.8% | 0.25 |
+| 2021 | M9 | all names | 40,067 | +4.35% | +12.15% | -7.81% | -30.7% | -1.66 |
+| 2021 | R20 | liquid only | 3,668 | -0.07% | +12.15% | -12.23% | -48.9% | -1.40 |
+| 2021 | M9 | liquid only | 29,528 | +5.74% | +12.15% | -6.41% | -26.7% | -1.55 |
+
+### The filter helps in one window and hurts in the other
+
+R20 over 2010-2020 goes from -6.75% to +0.91% when illiquid names are
+removed. R20 over 2021-2026 goes the other way, from -0.06% to -12.23%.
+M9 moves the opposite direction in each. There is no consistent story
+here, which means the liquidity floor is not a fix — it is another
+parameter with a window-dependent sign, and this project has enough of
+those.
+
+### The untuned rule now loses in all three windows
+M9 is the honest rule — three conditions, taken from the literature,
+never fitted. Corrected, it returns -1.23%, -0.95% and -7.81% against
+buy-and-hold. R20, the rule mined from the winners, wins one window,
+loses one badly and ties one.
+
+Drawdowns are -28% to -56% throughout, against an index that fell about
+as far. Whatever else is true, "index-like returns at half the drawdown"
+is dead several times over.
+
+**No arm anywhere in this table reaches |t| = 2.** Nothing here is
+distinguishable from noise in either direction.
+
+---
+
+## A correction: two earlier arms lost rows and their results are withdrawn
+
+Auditing logged trade counts against persisted rows found two arms
+disagreeing:
+
+| arm | logged | in database |
+|---|---|---|
+| s1r_B_pit_all_R20 | 5,383 | 4,422 |
+| s1r_B_pit_all_M9 | 80,863 | 39,918 |
+
+Every other arm checked matches exactly, including all of today's. The
+engine does not duplicate trades — probing 45 and then 300 universe-B
+names returns exactly as many unique keys as trades, and persists all of
+them. So this is lost rows, not collapsed duplicates.
+
+Both affected arms were written while the database was still inside the
+Google Drive tree. A sync client reconciling a stale copy underneath an
+open SQLite file would produce exactly this, and it is the failure mode
+that prompted moving the database out. I cannot prove that retroactively
+and I am not going to pretend otherwise.
+
+**What this invalidates:** the 2005-2009 row of the T4 policy table was
+computed from those two arms. Replaced by the w2_2005 arms above, and
+the replacement changes a sign — M9 over 2005-2009 was reported at
++1.78% always-parked, beating buy-and-hold by 0.79 points. It is
+actually **-0.24%, losing by 1.23**. The one window where the untuned
+rule appeared to win, it does not.
