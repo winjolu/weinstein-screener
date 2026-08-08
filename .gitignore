@@ -10,3 +10,5 @@ conf/
 *.log*
 CLAUDE.md
 config/portfolio.json
+.claude/
+docs/growth-fork-briefing.md
