@@ -10,3 +10,5 @@ conf/
 *.log*
 NOTES.md
 config/portfolio.json
+.localconf/
+docs/growth-fork-briefing.md
