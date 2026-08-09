@@ -8,7 +8,5 @@ __pycache__/
 reference/
 conf/
 *.log*
-NOTES.md
 config/portfolio.json
-.localconf/
-docs/growth-fork-briefing.md
+docs/*-briefing.md

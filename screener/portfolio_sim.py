@@ -884,7 +884,7 @@ def format_report(trades, benchmark=None, stake=1000.0, label=""):
 
     add(f"\n-- What the account would have done ------------------------------")
     add(f"  Most positions open at once: {account['peak_positions']}")
-    add(f"  So you'd have needed {money(account['capital_required'])} on hand to take every signal.")
+    add(f"  That needed {money(account["capital_required"])} on hand to take every signal.")
     add(f"  Profit {money(account['realised_profit'])} on that capital "
         f"= {account['total_return_pct']:+.1f}% total")
     add(f"  which is {account['cagr_pct']:+.1f}% a year compounded.")
@@ -892,8 +892,8 @@ def format_report(trades, benchmark=None, stake=1000.0, label=""):
     add(f"\n  Money is not all working all the time. On average only "
         f"{money(account['avg_capital'])} was")
     add(f"  actually in the market, so per dollar-year of exposure the rate is")
-    add(f"  {account['cagr_on_average_pct']:+.1f}% a year. The truth is between these two: you")
-    add(f"  cannot size an account to the average and still take every signal.")
+    add(f"  {account['cagr_on_average_pct']:+.1f}% a year. The truth is between these two: an")
+    add(f"  account cannot be sized to the average and still take every signal.")
 
     add(f"\n-- With profits reinvested ---------------------------------------")
     add(f"  The figures above never compound: every trade gets the same")
@@ -906,7 +906,7 @@ def format_report(trades, benchmark=None, stake=1000.0, label=""):
 
     spread = roi_uncertainty(trades, sample_size=100, stake=stake)
     if spread:
-        add(f"\n-- If you only got 100 signals -----------------------------------")
+        add(f"\n-- If only 100 signals arrived -----------------------------------")
         add(f"  Drawing 100 trades at random from these, {spread['draws']:,} times over,")
         add(f"  to show how much a 100-trade run is down to luck:")
         add(f"    worst 5% of runs:  {spread['p5']:+.2f}% a trade  "

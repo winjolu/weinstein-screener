@@ -22,7 +22,8 @@ import os
 import sqlite3
 import unittest
 
-CACHE = "/private/tmp/scratch/sharadar/sharadar.db"
+CACHE = os.environ.get("SHARADAR_DB",
+                       os.path.expanduser("~/market-data/sharadar.db"))
 MAX_DRIFT = 1.5      # a year of dividends never moves the ratio this far
 
 
