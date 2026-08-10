@@ -3481,3 +3481,80 @@ One draw of five looking good is what five draws do.
 
 **Closed.** No day-of-week edge, and the exercise was worth it for the
 lookahead alone.
+
+---
+
+## E2 — a SATA-shaped score. The attributes do not just fail to help, they cost
+
+SATA is closed, so this is a ten-attribute proxy built from the six
+categories its author discloses: price and moving averages, relative
+strength against the index, momentum, volume, breakouts, overhead
+resistance. Traded on the stated bands. Universe B, 2005-2009, equal
+weight, weekly. SPY over the window: +0.80%/yr.
+
+**Registered control, written before running:** "enter above 7, exit
+below 3" is a hysteresis band, structurally identical to the buy/hold
+spread already validated here, so a price-only band of similar
+selectivity runs beside it. If the two match, the attributes are
+decoration.
+
+| rule | CAGR |
+|---|---|
+| score, enter >= 7, exit <= 3 | +4.47% |
+| score, enter >= 6, exit <= 4 | +2.26% |
+| score, enter >= 8, exit <= 2 | +3.55% |
+| price band 0% (control) | +1.59% |
+| price band 10% (control) | +4.32% |
+| **price band 20% (control)** | **+7.65%** |
+
+The prediction was too generous. A plain price-versus-30-week band at
+20%, with no scoring at all, beats every version of the ten-attribute
+score. And the score's best result is almost exactly a 10% price band.
+
+So the score's performance is explained entirely by the dead zone it
+incidentally creates, and a dead zone built on purpose does it better.
+Nine extra attributes dilute the one that works. That is the same
+mechanism T5 and T5c established, arriving by a different route.
+
+**Limits:** one window, and a crash window at that; this is a proxy
+rather than SATA; **no transaction costs are charged**, which flatters
+whichever rule trades more; and no significance test — these are point
+estimates.
+
+---
+
+## E3 — cyclicals and dividends. The rule subtracts value in every bucket
+
+Each bucket held outright, against the same bucket traded with the trend
+rule. Where the rule adds nothing, the bucket is a tilt.
+
+| sector | hold | rule | rule adds |
+|---|---|---|---|
+| Healthcare | +13.33% | +6.99% | -6.34 |
+| Energy | +12.77% | +11.05% | -1.72 |
+| Basic Materials | +12.24% | +0.49% | -11.75 |
+| Consumer Defensive | +11.53% | +7.55% | -3.98 |
+| Industrials | +8.17% | -1.78% | -9.95 |
+| Utilities | +7.78% | +4.20% | -3.58 |
+| Technology | +7.59% | -0.39% | -7.98 |
+| Communication Services | +3.36% | -4.76% | -8.12 |
+| Real Estate | +2.28% | -13.20% | -15.48 |
+| Consumer Cyclical | +1.42% | +0.37% | -1.05 |
+| Financial Services | -4.88% | -10.63% | -5.75 |
+
+**Sixteen buckets, sixteen negatives**, from -1.05 to -15.48. The sector
+spread is large — Healthcare +13.33% against Financials -4.88% while the
+index returned +0.80% — and every point of it is available by holding.
+The rule earns none of it. That was the registered expectation and it
+holds without exception.
+
+### The dividend half is void on a units error
+Quintile 1 came back with an average yield of **24.62%**, which is
+impossible for common stock. Nominal dividends from the actions table
+were divided by split-adjusted prices: for any name that later split,
+the adjusted 2005 price is far below what it actually traded at, and the
+ratio inflates accordingly. The quintiles are therefore not sorted by
+yield and nothing is concluded from them.
+
+Wanted: dividends adjusted on the same basis as the prices, or yields
+read from a fundamentals table that computes them consistently.
