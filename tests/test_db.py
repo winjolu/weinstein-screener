@@ -366,11 +366,12 @@ class DefaultPathTest(unittest.TestCase):
 
     def test_the_environment_variable_wins(self):
         prev = os.environ.get("SCREENER_DB")
-        os.environ["SCREENER_DB"] = "/tmp/some-side.db"
+        side = os.path.join(tempfile.gettempdir(), "some-side.db")
+        os.environ["SCREENER_DB"] = side
         try:
             import importlib
             reloaded = importlib.reload(db)
-            self.assertEqual(reloaded.DB_PATH, "/tmp/some-side.db")
+            self.assertEqual(reloaded.DB_PATH, side)
         finally:
             if prev is None:
                 os.environ.pop("SCREENER_DB", None)
