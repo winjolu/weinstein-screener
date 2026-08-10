@@ -2,38 +2,54 @@
 
 Ordered by what would change a decision, not by effort.
 
-## Running now
-- **w2_2010_M9** — last of the four corrected-universe arms. The other
-  three are in and every one lost its edge over buy-and-hold.
-- **t5b_band30** — the band the spread sweep died in, re-run alone.
-- **t3** — the daily-bar sweep, 20/50/100/150/200 days.
-- **w3** — corrected universe restricted to names liquid enough to
-  trade. Decides whether W2's collapse was survivorship or microcaps.
-- **t5c** — random-thinning control on universe B, queued behind the
-  rest. Decides whether the entry band has a mechanism of its own.
+## Finished, recorded
+- **W2** — corrected point-in-time universes for all three windows. Every
+  edge over buy-and-hold disappeared; the untuned rule loses all three.
+- **W2b** — significance on active return. Nothing ever cleared t = 2,
+  before or after correction.
+- **W3** — liquidity floor. Helps one window, hurts the other. Not a fix.
+- **T3** — daily bars. Every arm worse than its weekly equivalent.
+- **T5b** — the entry band on universe B. A plateau at 20-30%.
+- **T5c** — random thinning. The band has a mechanism of its own.
+- **T4** — idle capital. The policy is worth more than the strategy.
+
+## Finished, not yet read
+- **Bands 17 and 18** ran (8,407 and 7,836 trades) and were never
+  analysed. They exist to settle whether the jump between 15% and 20% is
+  a real threshold or an artifact of where the grid happened to land.
+  Needs the weekly cache rebuilt first — a minute of work.
 
 ## Next, in order
-1. **Re-run T4's policy comparison on corrected arms only.** The
-   published table mixes a corrected 2005-2009 with two survivor-biased
-   windows. The conclusion held up but the table should not stand.
-2. **A cash-rate series instead of a flat 3%.** Short rates ran near 5%
-   in 2005-2007 and near 0.2% by 2009; a constant flatters cash early
-   and penalises it late. Same anachronism as the commissions, and the
-   same fix — do them together.
-3. **Era-aware commissions** at roughly $1 a trade rather than $8.
-4. **Corwin-Schultz spreads**, so slippage scales with each name's own
+1. **Re-run T4's policy table on corrected arms only.** The published
+   version mixes one corrected window with two survivor-biased ones. All
+   six w2 arms now exist, so this is arithmetic rather than compute.
+2. **A cash-rate series instead of a flat 3%**, alongside **era-aware
+   commissions** at roughly $1 a trade. Same anachronism, same fix.
+3. **Corwin-Schultz spreads**, so slippage scales with each name's own
    liquidity rather than a flat assumption.
-5. **T2 — MA type**, SMA against WMA against EMA. Needs `ema()`.
+4. **T2 — MA type**, SMA against WMA against EMA. `ema()` is written and
+   tested, so this is ready to run.
+5. **Move the fund-price drift gate into the screener.** It exists only
+   in scratch scripts. Any code touching fundprices without it will rank
+   corrupt series at the top, which is how a 7,946,566% return reached a
+   live screen.
 6. **Tight stop plus rebuy**, three arms.
 7. **Forced liquidation on a regime flip.**
-8. **Forward paper record.** Still empty. Every figure in this
-   repository is a backtest.
+8. **Score the forward log.** 25 rows written 2026-08-06: 15 buys, 7
+   holds, 2 exits, 1 no-signal. Nothing to read until months have passed,
+   which is the point of it.
 9. **Replication and review pass.**
 
-## Deferred with a reason
-See docs/known-gaps.md. Two worth repeating here:
-- The database sits in a synced folder and does one write transaction
-  per trade. `SCREENER_DB` works around it; batching the inserts is the
-  actual fix.
-- Nothing has been traded. The strongest evidence this project could
-  produce is the one kind it has none of.
+## Waiting on something outside this repo
+- **SATA.** `indicator_readings` is built and empty. Needs scores read
+  off charts for a spread of names — including low scorers and names I
+  have no interest in owning, or the sample measures my judgement rather
+  than the indicator.
+
+## Housekeeping
+- `data/` holds 8GB of leftovers inside the synced folder:
+  `sharadar.db.driveback` at 6.3GB, `daily_bars.pkl` at 1.6GB,
+  `weekly_bars.pkl` at 334MB, and `screener.db.moved-20260806`. The live
+  database is in application support and the live market data is in
+  ~/market-data, so these are all stale copies being uploaded for
+  nothing.
