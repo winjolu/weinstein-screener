@@ -3369,3 +3369,53 @@ This vindicates T5b's mechanism, which the ticker-count fall had put in
 doubt. The band is not merely reducing participation; participation
 reduction on its own costs about 1.5 points, and the band gains 2.7. It
 is the one finding tonight that survived its own control.
+
+---
+
+## T5d — the 15-to-20 step is a ramp, not a threshold
+
+T5b showed most of the band's effect arriving between two adjacent
+settings while every other neighbouring pair moved by fractions of a
+point. Either a real threshold sat between them or 20% was simply where
+the grid landed. Bands 17 and 18 settle it.
+
+| band | trades | tickers | entries/ticker | win% | CAGR | vs B&H | active t |
+|---|---|---|---|---|---|---|---|
+| 0% | 39,205 | 3,723 | 10.53 | 18.2 | +1.78% | +0.98% | -0.15 |
+| 10% | 13,533 | 3,656 | 3.70 | 33.4 | +1.92% | +1.12% | -0.15 |
+| 15% | 9,648 | 3,476 | 2.78 | 35.4 | +1.68% | +0.89% | -0.02 |
+| **17%** | 8,407 | 3,333 | 2.52 | 36.0 | **+2.10%** | +1.31% | -0.07 |
+| **18%** | 7,836 | 3,256 | 2.41 | 36.4 | **+2.95%** | +2.15% | 0.18 |
+| 20% | 6,826 | 3,082 | 2.21 | 36.9 | +4.51% | +3.71% | 0.39 |
+| 25% | 4,904 | 2,617 | 1.87 | 38.1 | +4.46% | +3.66% | 0.39 |
+| 30% | 3,552 | 2,143 | 1.66 | 39.4 | +4.36% | +3.56% | -0.11 |
+
+The two new bands fall between their neighbours and the curve climbs
+monotonically: 1.68, 2.10, 2.95, 4.51, with increments of 0.42, 0.85 and
+1.56. That is a ramp into a plateau, not a step. The apparent
+discontinuity was the grid being too coarse between 15 and 20, which is
+what a boundary artifact looks like and why the extra bands were run
+rather than the shape being argued about.
+
+### None of it is significant
+Active t against SPY runs from -0.15 to +0.39 across all eight bands.
+Every figure in the table is indistinguishable from noise. The shape is
+consistent and the mechanism survived its thinning control, and neither
+of those is the same as evidence. This is a plausible refinement, not a
+demonstrated one.
+
+### The benchmark moves with how weekly bars are built
+Rebuilding the cache changed buy-and-hold for this window from the
++0.99% recorded earlier to +0.80%, and the daily source gives +0.48%.
+
+The cause is bucketing. A weekly bar carries the *last* daily close of
+its week, so the benchmark's starting price is 2005-01-07 at 79.87
+rather than 2005-01-03 at 81.12. SPY fell that week, and the lower base
+inflates the measured rate. The daily figure is the honest one: buy at
+the first available close, sell at the last.
+
+Half a point of slack sits under every "vs buy-and-hold" number in this
+document. It does not change any ranking, because arms within a
+comparison share a benchmark, and it does change the absolute claims.
+**Wanted:** compute the benchmark from daily bars regardless of what the
+strategy is sampled on.
