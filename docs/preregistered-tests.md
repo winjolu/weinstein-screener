@@ -3419,3 +3419,65 @@ document. It does not change any ranking, because arms within a
 comparison share a benchmark, and it does change the absolute claims.
 **Wanted:** compute the benchmark from daily bars regardless of what the
 strategy is sampled on.
+
+---
+
+## E1 — day of the week. Refuted, and it found a worse bug on the way
+
+Registered before running: any effect would be under ~2%/yr gross,
+unstable between halves, and gone after costs. Exploratory and
+acknowledged as such — 5 days x 5 slices is 25 looks, so the Bonferroni
+bar is t = 2.88.
+
+### A one-day timing error was worth eleven points a year
+
+The first pass compared each day's close with its own trailing average
+and then collected *that same day's* return. The return is earned during
+the day; the close does not exist until the day is over. Lagging the
+signal so it uses only prices from the previous close changes the plain
+200-day timing rule from **+19.48%/yr to +8.45%/yr**.
+
+| window | lagged | buy and hold | edge | with lookahead |
+|---|---|---|---|---|
+| 2005-2026 | +8.45% | +10.97% | **-2.52** | +19.48% |
+| 2005-2015 | +6.06% | +7.05% | -0.99 | +16.88% |
+| 2015-2026 | +10.90% | +14.87% | -3.98 | +22.14% |
+| 2010-2026, no 2008 | +9.66% | +14.15% | -4.49 | +20.88% |
+
+Corrected, the timing rule loses to buying and holding in every window
+while cutting the worst drawdown from -55% to -21%. That is the same
+answer the rest of this register keeps giving: insurance, not an edge.
+
+The lookahead version was stable across halves, survived removing 2008,
+and held at 20bp costs. Every robustness check passed. **A defect that
+passes robustness checks is what a defect looks like from the inside**,
+and the only thing that caught it was the number being too good.
+
+### No day effect survives a proper test
+Testing a day against zero inside a trend filter mostly re-measures the
+trend. Against the *other four days in the same regime*:
+
+| regime | day | difference | t |
+|---|---|---|---|
+| down | Tue | +31.65bp | 1.99 |
+| down | Mon | -28.61bp | -1.51 |
+| up | Mon | +5.31bp | 1.63 |
+
+Nothing reaches 2.88, or even 2.0.
+
+### The tradeable version is a diluted trend filter
+Sitting out one weekday while the index is below its average:
+
+| rule | CAGR | vs B&H |
+|---|---|---|
+| sit out Mon | +12.56% | +1.65 |
+| sit out Tue | +7.21% | -3.70 |
+| sit out Fri | +10.72% | -0.19 |
+| random 20% of days | +9.37 / +9.61 / +8.44% | -1.30 to -2.47 |
+
+Monday is the only variant above buy-and-hold, on an underlying t of
+-1.51, and it sits inside a five-day spread running from -3.70 to +1.65.
+One draw of five looking good is what five draws do.
+
+**Closed.** No day-of-week edge, and the exercise was worth it for the
+lookahead alone.
