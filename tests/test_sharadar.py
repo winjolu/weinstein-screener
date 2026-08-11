@@ -248,3 +248,133 @@ class RefreshTest(_Stubbed):
         self.stub([[]])
         sharadar.refresh("prices", db_path=path)
         self.assertEqual(self.calls[0][0], "stocks")
+
+
+class ArchivalGuardTest(unittest.TestCase):
+    """History a shorter entitlement cannot replace must be unwritable.
+
+    The bulk loaders are destructive by design — one drops a table, one
+    removes the database file. That was safe while the subscription
+    carried full depth. It is not safe now: a rebuild replaces decades
+    with twelve months and nothing can restore the difference.
+    """
+
+    def _db(self, rows=(("2005-01-03", 10.0), ("2026-08-03", 20.0))):
+        import os
+        import sqlite3
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE prices (ticker TEXT, date TEXT, close REAL)")
+        conn.executemany("INSERT INTO prices VALUES ('AAA',?,?)", rows)
+        conn.commit()
+        conn.close()
+        return path
+
+    def test_freezing_counts_the_rows_it_protects(self):
+        path = self._db()
+        held = sharadar.freeze_history("prices", "2025-08-11", db_path=path)
+        self.assertEqual(held, 1)
+        self.assertEqual(sharadar.frozen_before("prices", db_path=path), "2025-08-11")
+
+    def test_an_unfrozen_table_permits_anything(self):
+        # No watermark means no claim about what is archival. Refusing by
+        # default would block the first legitimate bulk load.
+        path = self._db()
+        sharadar.assert_writable("prices", "1990-01-01", db_path=path)
+
+    def test_reaching_below_the_watermark_is_refused(self):
+        path = self._db()
+        sharadar.freeze_history("prices", "2025-08-11", db_path=path)
+        with self.assertRaises(sharadar.ArchivalWrite):
+            sharadar.assert_writable("prices", "2010-01-01", db_path=path)
+
+    def test_appending_after_the_watermark_is_allowed(self):
+        # The guard has to permit the daily refresh, or it will be
+        # switched off and protect nothing.
+        path = self._db()
+        sharadar.freeze_history("prices", "2025-08-11", db_path=path)
+        sharadar.assert_writable("prices", "2026-08-04", db_path=path)
+
+    def test_the_boundary_date_itself_is_writable(self):
+        # frozen_before is exclusive: rows *before* it are archival, so
+        # an operation starting exactly at the watermark is fine.
+        path = self._db()
+        sharadar.freeze_history("prices", "2025-08-11", db_path=path)
+        sharadar.assert_writable("prices", "2025-08-11", db_path=path)
+
+    def test_freezing_is_idempotent_rather_than_accumulating(self):
+        path = self._db()
+        sharadar.freeze_history("prices", "2025-08-11", db_path=path)
+        sharadar.freeze_history("prices", "2025-08-11", db_path=path)
+        import sqlite3
+        conn = sqlite3.connect(path)
+        n = conn.execute("SELECT COUNT(*) FROM data_coverage").fetchone()[0]
+        conn.close()
+        self.assertEqual(n, 1)
+
+
+class RefreshGapTest(_Stubbed):
+    """An append that leaves an unfillable hole must fail, not succeed.
+
+    refresh() asks for rows after the newest stored. Once the local data
+    has fallen further behind than the entitlement reaches, the earliest
+    row the API can return sits past the gap — and appending it writes a
+    hole into the middle of the series while reporting success. A silent
+    hole is worse than a failed refresh, because every later read treats
+    it as real absence.
+    """
+
+    def _db(self, newest="2026-08-03"):
+        import os
+        import sqlite3
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE prices (ticker TEXT, date TEXT, close REAL)")
+        conn.execute("INSERT INTO prices VALUES ('AAA',?,1.0)", (newest,))
+        conn.commit()
+        conn.close()
+        return path
+
+    def test_a_contiguous_append_succeeds(self):
+        path = self._db("2026-08-03")
+        self.stub([[{"ticker": "AAA", "date": "2026-08-04", "close": "2.0"}]])
+        self.assertEqual(sharadar.refresh("prices", db_path=path), 1)
+
+    def test_a_hole_larger_than_the_window_raises(self):
+        path = self._db("2026-08-03")
+        self.stub([[{"ticker": "AAA", "date": "2027-06-01", "close": "2.0"}]])
+        with self.assertRaises(sharadar.RefreshGap):
+            sharadar.refresh("prices", db_path=path)
+
+    def test_the_hole_is_reported_before_anything_is_written(self):
+        # The failure has to happen before the insert, or the guard just
+        # describes damage it has already done.
+        import sqlite3
+        path = self._db("2026-08-03")
+        self.stub([[{"ticker": "AAA", "date": "2027-06-01", "close": "2.0"}]])
+        with self.assertRaises(sharadar.RefreshGap):
+            sharadar.refresh("prices", db_path=path)
+        conn = sqlite3.connect(path)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0], 1)
+        conn.close()
+
+    def test_a_deliberate_override_still_works(self):
+        path = self._db("2026-08-03")
+        self.stub([[{"ticker": "AAA", "date": "2027-06-01", "close": "2.0"}]])
+        self.assertEqual(
+            sharadar.refresh("prices", db_path=path, allow_gap=True), 1)
+
+
+class FundamentalsDateColumnTest(unittest.TestCase):
+    def test_fundamentals_keys_on_datekey_not_calendardate(self):
+        # A company filing six months late carries an old calendardate
+        # and a new datekey. Keying the refresh on calendardate asks for
+        # dates after the newest stored and never sees that filing —
+        # permanently, and slow filers are not a random sample.
+        self.assertEqual(sharadar.DATE_COLUMN["fundamentals"], "datekey")

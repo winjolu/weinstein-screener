@@ -1,0 +1,60 @@
+//@version=5
+// Tests a score-threshold rule against buy-and-hold, using another
+// indicator's plot as the signal.
+//
+// The score I want to test lives in a protected script, so its logic
+// cannot be read or reproduced. input.source() sidesteps that entirely:
+// it takes whatever that indicator plots on this chart and treats it as
+// a series here. Nothing needs to be extracted, and the test runs in
+// TradingView's own engine rather than a reconstruction of it.
+//
+// Two thresholds rather than one, deliberately. Buying above a high
+// score and selling below a lower one leaves a dead band between them
+// where nothing happens. My own testing says that band is what makes a
+// rule like this work at all — a single threshold flips back and forth
+// every time the score wobbles across it. Set entry and exit to the same
+// number to measure how much the band is worth.
+strategy("Score threshold vs buy and hold", overlay=true,
+     initial_capital=100000, default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100, commission_type=strategy.commission.percent,
+     commission_value=0.02, slippage=1, calc_on_every_tick=false,
+     process_orders_on_close=true)
+
+scoreSrc  = input.source(close, "Score plot",
+     tooltip="Select the score plot of the indicator being tested. It must already be on this chart.")
+entryAt   = input.int(7, "Enter when score is at least", minval=0, maxval=10)
+exitAt    = input.int(3, "Exit when score is at most",  minval=0, maxval=10)
+useTrend  = input.bool(false, "Only enter while the index is above its 30-period average")
+idxSym    = input.symbol("SPY", "Index")
+
+// The index filter is read with lookahead_off and a confirmed bar, so a
+// weekly test cannot see a value that was not final when it traded.
+idxClose  = request.security(idxSym, timeframe.period, close[1],
+     lookahead=barmerge.lookahead_off)
+idxMa     = ta.sma(idxClose, 30)
+regimeOk  = not useTrend or idxClose > idxMa
+
+// The score is evaluated on the previous bar. A weekly score is not
+// final until the week closes, so acting on the current bar's value
+// would be trading on a number that does not exist yet.
+score     = scoreSrc[1]
+
+longOk    = not na(score) and score >= entryAt and regimeOk
+flatOk    = not na(score) and score <= exitAt
+
+if longOk and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+if flatOk and strategy.position_size > 0
+    strategy.close("Long")
+
+// Buy-and-hold on the same bars, so the comparison is like for like
+// rather than against a number remembered from somewhere else.
+var float bhUnits = na
+if na(bhUnits) and not na(close) and close > 0
+    bhUnits := 100000 / close
+bhEquity  = bhUnits * close
+
+plot(bhEquity, "Buy and hold equity", display=display.data_window)
+plot(strategy.equity, "Strategy equity", display=display.data_window)
+plot(score, "Score in use", display=display.data_window)
+bgcolor(strategy.position_size > 0 ? color.new(color.green, 92) : na)

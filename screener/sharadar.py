@@ -197,7 +197,13 @@ DATE_COLUMN = {
     "prices": "date",
     "fundprices": "date",
     "dailyfundamentals": "date",
-    "fundamentals": "calendardate",
+    # datekey, not calendardate. A company filing its Q1 six months late
+    # carries an old calendardate and a new datekey, so asking for
+    # calendardate greater than the newest stored skips that filing
+    # permanently — and slow filers are 2.28% of rows, which is not a
+    # random 2.28%. datekey is also the column every point-in-time read
+    # has to use anyway.
+    "fundamentals": "datekey",
     "actions": "date",
     "events": "date",
     "insiders": "filingdate",
@@ -207,6 +213,98 @@ DATE_COLUMN = {
 # Local table name -> the API table it comes from, where they differ.
 API_TABLE = {"prices": "stocks", "fundprices": "funds",
              "dailyfundamentals": "daily"}
+
+
+# History held from a full-depth bulk load is archival. A shorter
+# entitlement changes what can be downloaded; it does not change what is
+# already held, and nothing should treat those as the same thing.
+COVERAGE_TABLE = "data_coverage"
+
+# How far the local data may fall behind before an append becomes a lie.
+# refresh() asks for rows after the newest stored. Once the local data is
+# further behind than the entitlement reaches, the earliest row the API
+# will return sits past the gap, and appending it writes an unfillable
+# hole while reporting success.
+MAX_REFRESH_GAP_DAYS = 30
+
+
+class ArchivalWrite(RuntimeError):
+    """An operation would destroy history that cannot be re-downloaded."""
+
+
+class RefreshGap(RuntimeError):
+    """An append would leave an unfillable hole in the series."""
+
+
+def _ensure_coverage(conn):
+    conn.execute(
+        f"""CREATE TABLE IF NOT EXISTS {COVERAGE_TABLE} (
+                table_name TEXT PRIMARY KEY,
+                frozen_before TEXT NOT NULL,
+                rows_at_freeze INTEGER,
+                note TEXT)""")
+
+
+def freeze_history(table, before, note=None, db_path=None):
+    """Mark everything in `table` dated before `before` as archival.
+
+    Run once while the full-depth entitlement is still active. After
+    that, assert_writable refuses any operation reaching below the
+    watermark, whichever project attempts it.
+    """
+    import sqlite3
+    column = DATE_COLUMN.get(table)
+    if not column:
+        raise ValueError(f"no date column known for {table!r}")
+    conn = sqlite3.connect(db_path or DB_PATH)
+    try:
+        _ensure_coverage(conn)
+        held = conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE {column} < ?", (before,)).fetchone()[0]
+        conn.execute(
+            f"INSERT OR REPLACE INTO {COVERAGE_TABLE} VALUES (?,?,?,?)",
+            (table, before, held, note))
+        conn.commit()
+    finally:
+        conn.close()
+    return held
+
+
+def frozen_before(table, db_path=None):
+    """The archival watermark for `table`, or None if never frozen."""
+    import sqlite3
+    conn = sqlite3.connect(db_path or DB_PATH)
+    try:
+        _ensure_coverage(conn)
+        row = conn.execute(
+            f"SELECT frozen_before FROM {COVERAGE_TABLE} WHERE table_name = ?",
+            (table,)).fetchone()
+    finally:
+        conn.close()
+    return row[0] if row else None
+
+
+def assert_writable(table, earliest_affected, db_path=None):
+    """Raise unless an operation confined to `earliest_affected` onwards is safe.
+
+    Every destructive path — a bulk rebuild, a DROP, a reload — calls
+    this first. Appending later rows is always allowed; reaching below
+    the watermark is not.
+    """
+    mark = frozen_before(table, db_path=db_path)
+    if mark and str(earliest_affected) < mark:
+        raise ArchivalWrite(
+            f"{table}: rows before {mark} came from a full-depth load and "
+            f"cannot be re-downloaded, but this would touch {earliest_affected}. "
+            f"Append instead, or clear the watermark deliberately.")
+
+
+def _days_between(earlier, later):
+    """Calendar days from `earlier` to `later`, 0 if the order is reversed."""
+    import datetime
+    a = datetime.date.fromisoformat(str(earlier)[:10])
+    b = datetime.date.fromisoformat(str(later)[:10])
+    return max((b - a).days, 0)
 
 
 def latest_local_date(table, db_path=None):
@@ -223,7 +321,8 @@ def latest_local_date(table, db_path=None):
     return row[0] if row and row[0] else None
 
 
-def refresh(table, db_path=None, since=None, dry_run=False):
+def refresh(table, db_path=None, since=None, dry_run=False,
+            allow_gap=False, max_gap_days=MAX_REFRESH_GAP_DAYS):
     """Append rows dated after what we already hold.
 
     Returns the number of rows inserted. Safe to run repeatedly: it asks
@@ -245,6 +344,16 @@ def refresh(table, db_path=None, since=None, dry_run=False):
                          "do not build it one day at a time")
 
     rows = fetch(API_TABLE.get(table, table), **{f"{column}.gt": start})
+    if rows and not allow_gap:
+        earliest = min(str(r.get(column, "")) for r in rows if r.get(column))
+        gap = _days_between(start, earliest)
+        if gap > max_gap_days:
+            raise RefreshGap(
+                f"{table}: newest stored row is {start}, but the earliest the "
+                f"API returns is {earliest} — a {gap}-day hole the entitlement "
+                f"can no longer fill. Appending would report success and leave "
+                f"the series broken. Pass allow_gap=True only if the hole is "
+                f"genuinely acceptable.")
     if dry_run or not rows:
         return len(rows)
 

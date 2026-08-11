@@ -240,3 +240,101 @@ def scoreboard(bars_by_symbol=None):
                         (entry["price_now"] - row["price"]) / row["price"] * 100)
         out.append(entry)
     return out
+
+
+def _order_quantity(leg):
+    """The real size of an order leg, preferring what actually filled.
+
+    `leg.get("filled_quantity") or leg.get("total_quantity")` looks
+    right and is wrong: a working stop reports filled_quantity as the
+    string "0", and a non-empty string is truthy in Python regardless of
+    what it says, so the `or` never reaches total_quantity at all. Every
+    stop logged this way read as covering zero shares. Comparing the
+    parsed number instead of the string's truthiness is what a test
+    that only checks a digit appears somewhere in the output cannot
+    catch — "0" and "20" both contain digits.
+    """
+    for key in ("filled_quantity", "total_quantity"):
+        raw = leg.get(key)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return None
+
+
+def reconcile_broker_orders(order_history, source="broker_api"):
+    """Fold a broker's real order history into the forward log.
+
+    Manually typing every fill in from a screenshot is how a stop-loss
+    order sat on a live position for days without me knowing it existed
+    — it never got mentioned, so it never got logged. Order history from
+    the broker has no such gap: every leg that actually reached the
+    account is in it, whether or not anyone remembered to describe it.
+
+    Takes the nested combo-order shape a broker's order-history endpoint
+    returns — a list of combos, each holding one or more legs — and
+    writes one recommendation row per leg that represents a real account
+    event: a filled buy or sell, or a stop-loss order in any live state.
+    A resting, unfilled ordinary order is not a completed event and is
+    skipped, so a limit order that never fills cannot be logged as a
+    trade that happened.
+
+    Idempotent on (ticker, date, action): re-running against overlapping
+    history overwrites the same rows with the same values rather than
+    duplicating them. Two same-side fills in the same name on the same
+    day collide under that key — a real gap, and one this schema does
+    not resolve, since telling them apart would need the row keyed on
+    something the broker returns but this table was not built to hold.
+    """
+    written = 0
+    for combo in order_history:
+        for leg in combo.get("orders", []):
+            symbol = leg.get("symbol")
+            side = leg.get("side")
+            qty = _order_quantity(leg)
+            order_type = leg.get("order_type", "")
+            status = leg.get("status", "")
+            when = leg.get("filled_time_at") or leg.get("place_time_at")
+            if not (symbol and side and qty and when):
+                continue
+            suggested_on = when[:10]
+            is_stop = order_type in ("STOP_LOSS", "STOP_LOSS_LIMIT")
+
+            if is_stop:
+                stop_price = leg.get("stop_price")
+                limit_price = leg.get("limit_price")
+                note = f"Stop order {status.lower()}: stop {stop_price}"
+                if limit_price:
+                    note += f", limit {limit_price}"
+                note += f", {leg.get('time_in_force', '?')}, qty {qty:g}."
+                db.save_recommendation({
+                    "ticker": symbol.upper(),
+                    "suggested_on": suggested_on,
+                    "action": "stop_set",
+                    "shares": qty,
+                    "price": None,
+                    "stop": float(stop_price) if stop_price else None,
+                    "rationale": f"Synced from {source}.",
+                    "taken": "yes",
+                    "taken_note": note,
+                })
+                written += 1
+            elif status == "FILLED":
+                price = leg.get("filled_price")
+                action = "buy" if side == "BUY" else "sell"
+                db.save_recommendation({
+                    "ticker": symbol.upper(),
+                    "suggested_on": suggested_on,
+                    "action": action,
+                    "shares": qty,
+                    "price": float(price) if price else None,
+                    "stop": None,
+                    "rationale": f"Synced from {source}.",
+                    "taken": "yes",
+                    "taken_note": f"{action.capitalize()} {qty:g} @ {price} ({order_type}).",
+                })
+                written += 1
+    return written

@@ -479,3 +479,39 @@ that do not are *not* unadjusted — none of them match their own split
 factor, and several show large falls where an unadjusted reverse split
 would show a rise. They are distressed microcaps that collapsed
 immediately after reverse-splitting, which is a real price move.
+
+## The market database is archival now
+
+The subscription drops to a one-year history window. Everything older
+than that is already downloaded and cannot be re-fetched at any price,
+so the file is an archive rather than a cache.
+
+**161,730,514 rows are frozen before 2025-08-11**, recorded per table in
+`data_coverage`. `assert_writable()` refuses any operation reaching below
+that watermark; appending later rows is unaffected.
+
+The watermark had never actually been written. `archival_guard.py`
+existed and read `data_coverage`, but that table did not exist, so
+`_watermarks()` returned nothing and the guard permitted everything it
+was written to prevent. A guard that cannot find its own watermark fails
+open and looks installed.
+
+Three other things were wrong or missing:
+
+- `DATE_COLUMN["fundamentals"]` keyed on `calendardate`. A company filing
+  late carries an old calendardate and a new datekey, so a refresh keyed
+  on calendardate never sees that filing — permanently, for 2.28% of
+  rows that are emphatically not a random 2.28%. Now `datekey`.
+- `refresh()` had no gap guard. It appends rows dated after the newest
+  stored; once local data falls further behind than the entitlement
+  reaches, the earliest available row sits past the gap and appending it
+  writes an unfillable hole while reporting success. It now raises
+  above 30 days unless `allow_gap=True`.
+- `build_weekly.py` and `build_daily.py` opened the database read-write
+  despite only reading. Both now open `mode=ro`, so a stray write is
+  impossible rather than merely unlikely.
+
+**Still not fixed:** refreshes should run from one scheduled job rather
+than from either project. Nothing enforces that yet — the read-only
+opens make accidental writes harder, not impossible, and two writers
+remains a live hazard.

@@ -194,3 +194,139 @@ class RecommendationLogTest(unittest.TestCase):
                                      price=100.0)
         board = portfolio.scoreboard({"AAA": _bars([100.0, 110.0])})
         self.assertAlmostEqual(board[0]["move_pct"], 10.0, places=6)
+
+
+class ReconcileBrokerOrdersTest(unittest.TestCase):
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self._prev = db.DB_PATH
+        db.DB_PATH = os.path.join(self._dir.name, "data", "test.db")
+        db._schema_ready_for = None
+
+    def tearDown(self):
+        db.DB_PATH = self._prev
+        db._schema_ready_for = None
+        self._dir.cleanup()
+
+    """Folding real broker order history into the forward log.
+
+    The case this exists for: a stop-loss order sat live on an account
+    for days, unmentioned, because nobody happened to describe it. This
+    reads the broker's own record instead of relying on anyone to.
+    """
+
+    def _combo(self, symbol, side, order_type, status, qty, **extra):
+        leg = {"symbol": symbol, "side": side, "order_type": order_type,
+              "status": status, "total_quantity": str(qty),
+              "filled_quantity": str(qty) if status == "FILLED" else "0",
+              "time_in_force": "GTC"}
+        leg.update(extra)
+        return {"orders": [leg]}
+
+    def test_a_filled_buy_becomes_a_buy_record(self):
+        history = [self._combo("TMFC", "BUY", "LIMIT", "FILLED", 20,
+                               filled_price="80.46", limit_price="80.50",
+                               filled_time_at="2026-08-07T15:49:07.401Z")]
+        n = portfolio.reconcile_broker_orders(history)
+        self.assertEqual(n, 1)
+        rows = db.get_recommendations("TMFC")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["action"], "buy")
+        self.assertAlmostEqual(rows[0]["price"], 80.46)
+        self.assertEqual(rows[0]["suggested_on"], "2026-08-07")
+
+    def test_a_filled_sell_becomes_a_sell_record(self):
+        history = [self._combo("PSEC", "SELL", "MARKET", "FILLED", 1,
+                               filled_price="2.27",
+                               filled_time_at="2026-08-10T15:24:06.017Z")]
+        portfolio.reconcile_broker_orders(history)
+        rows = db.get_recommendations("PSEC")
+        self.assertEqual(rows[0]["action"], "sell")
+        self.assertAlmostEqual(rows[0]["price"], 2.27)
+
+    def test_a_working_stop_is_logged_even_though_it_has_not_filled(self):
+        # The order that started this: a live stop is real account state
+        # the moment it is placed, not only once it triggers.
+        history = [self._combo("TMFC", "SELL", "STOP_LOSS", "SUBMITTED", 20,
+                               stop_price="72.00",
+                               place_time_at="2026-08-07T15:49:07.206Z")]
+        portfolio.reconcile_broker_orders(history)
+        rows = db.get_recommendations("TMFC")
+        self.assertEqual(rows[0]["action"], "stop_set")
+        self.assertAlmostEqual(rows[0]["stop"], 72.00)
+
+    def test_a_stop_limit_records_both_prices_in_the_note(self):
+        history = [self._combo("TEAM", "SELL", "STOP_LOSS_LIMIT", "SUBMITTED", 10,
+                               stop_price="120.00", limit_price="115.00",
+                               place_time_at="2026-08-10T15:04:57.180Z")]
+        portfolio.reconcile_broker_orders(history)
+        note = db.get_recommendations("TEAM")[0]["taken_note"]
+        self.assertIn("120.00", note)
+        self.assertIn("115.00", note)
+
+    def test_the_stop_note_includes_time_in_force_and_quantity(self):
+        # Stop and limit prices alone are not enough to act on later — a
+        # stop with no recorded TIF looks identical to one that quietly
+        # expired at the close, which is the exact trap a Day order sets.
+        history = [self._combo("NVDA", "SELL", "STOP_LOSS", "SUBMITTED", 1,
+                               stop_price="176.00",
+                               place_time_at="2026-08-10T15:18:01.113Z")]
+        portfolio.reconcile_broker_orders(history)
+        note = db.get_recommendations("NVDA")[0]["taken_note"]
+        self.assertIn("GTC", note)
+        self.assertIn("qty 1", note)
+
+    def test_a_working_stop_records_its_real_quantity_not_zero(self):
+        # The bug this exists to catch: a broker reports filled_quantity
+        # as the string "0" on an order that has not filled, and "0" or
+        # total_quantity is truthy regardless of what the string says —
+        # the fallback never triggers, and every stop reads as covering
+        # no shares. Checked against the note text on a size a stray "1"
+        # or "0" elsewhere in the string could not disguise.
+        history = [self._combo("TMFC", "SELL", "STOP_LOSS", "SUBMITTED", 20,
+                               stop_price="72.00",
+                               place_time_at="2026-08-07T15:49:07.206Z")]
+        portfolio.reconcile_broker_orders(history)
+        note = db.get_recommendations("TMFC")[0]["taken_note"]
+        self.assertIn("qty 20", note)
+        self.assertNotIn("qty 0", note)
+
+    def test_an_unfilled_ordinary_order_is_not_logged_as_a_trade(self):
+        # A resting limit buy that has not filled is not a completed
+        # event. Logging it as one would record a trade that never
+        # happened.
+        history = [self._combo("AAPL", "BUY", "LIMIT", "WORKING", 5,
+                               place_time_at="2026-08-10T15:00:00.000Z")]
+        n = portfolio.reconcile_broker_orders(history)
+        self.assertEqual(n, 0)
+        self.assertEqual(db.get_recommendations("AAPL"), [])
+
+    def test_rerunning_the_same_history_does_not_duplicate(self):
+        history = [self._combo("NVDA", "BUY", "LIMIT", "FILLED", 1,
+                               filled_price="219.42",
+                               filled_time_at="2026-08-10T15:18:01.172Z")]
+        portfolio.reconcile_broker_orders(history)
+        portfolio.reconcile_broker_orders(history)
+        self.assertEqual(len(db.get_recommendations("NVDA")), 1)
+
+    def test_a_leg_missing_a_symbol_is_skipped_rather_than_raising(self):
+        history = [{"orders": [{"side": "BUY", "order_type": "MARKET",
+                                "status": "FILLED", "total_quantity": "1"}]}]
+        self.assertEqual(portfolio.reconcile_broker_orders(history), 0)
+
+    def test_multiple_legs_across_combos_are_all_processed(self):
+        # The real shape: a bracket order is a MASTER combo (the entry)
+        # paired with a separate STOP_LOSS combo, not one leg on one
+        # combo. Both have to be walked.
+        history = [
+            self._combo("NVDA", "BUY", "LIMIT", "FILLED", 1,
+                       filled_price="219.42",
+                       filled_time_at="2026-08-10T15:18:01.172Z"),
+            self._combo("NVDA", "SELL", "STOP_LOSS", "SUBMITTED", 1,
+                       stop_price="176.00",
+                       place_time_at="2026-08-10T15:18:01.113Z"),
+        ]
+        n = portfolio.reconcile_broker_orders(history)
+        self.assertEqual(n, 2)
+        actions = {r["action"] for r in db.get_recommendations("NVDA")}
+        self.assertEqual(actions, {"buy", "stop_set"})
