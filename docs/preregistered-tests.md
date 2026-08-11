@@ -3558,3 +3558,82 @@ yield and nothing is concluded from them.
 
 Wanted: dividends adjusted on the same basis as the prices, or yields
 read from a fundamentals table that computes them consistently.
+
+---
+
+## F1 — does a fundamental leg add anything the price legs do not?
+### Registered 2026-08-11, before any data was looked at
+
+The question behind it: if a name passes several screens, is that
+stronger evidence than passing one? Only if the screens make
+*independent* errors. This project has twice found they usually do not —
+ten SATA-shaped attributes lost to a single price band, and TMFC
+correlates 0.97 with SPY. Stacking correlated signals adds confidence
+without adding information.
+
+So the test is not "do three screens agree". It is whether the one
+genuinely orthogonal ingredient carries signal the existing ones lack.
+
+### Why fundamentals rather than a second price screen
+Mapping CAN SLIM against what the current screen already measures:
+
+| criterion | already covered? |
+|---|---|
+| N — new highs | yes, the 52-week-high test |
+| L — leader not laggard | yes, Mansfield RS |
+| M — market direction | yes, the market gate |
+| S — supply and demand | partly, volume confirmation |
+| **C, A — earnings growth** | **no** |
+| **I — institutional sponsorship** | **no** |
+
+Three of six are the same measurements under different names. Only
+earnings growth and institutional ownership are new, and both sit unused
+in `fundamentals` and `holdings`. A second momentum screen would re-ask
+a question already answered; this asks a new one.
+
+### Hypothesis, stated before looking
+**H1.** Among names already passing the price screen, those in the top
+quintile of earnings growth outperform the bottom quintile by more than
+random selection of the same size.
+
+**H0.** No difference beyond what random thinning produces.
+
+**Prediction, on the record:** I expect H1 to fail, or to survive only
+in the derivation window and die out of sample. Every added filter this
+project has tested has cost more than it earned — four independent
+routes to that finding — and the base rate for a new one working is low.
+Writing that down now so a positive result cannot be reported as
+expected and a negative one as obvious.
+
+### Design
+- **Universe:** the corrected point-in-time sets already built
+  (`pitU_2010`, `pitU_2021`), so survivorship is handled from the start
+  rather than discovered afterwards.
+- **Point-in-time discipline:** fundamentals joined on `datekey`, never
+  `calendardate`. A late filing carries an old calendardate, and joining
+  on it would leak a figure that was not public on the checkpoint date.
+  This is the same defect just fixed in the refresh path.
+- **Derivation:** 2010-2020. **Holdout:** 2021-2026, reserved and not
+  examined until the derivation result is written down.
+- **Controls, both required:**
+  1. *Random thinning* to the same surviving name count — the control
+     that rescued the entry band in T5c and would have exposed the
+     day-of-week result as a diluted trend filter.
+  2. *Shuffled fundamentals* — the same screen with earnings figures
+     randomly reassigned between tickers. Preserves every distributional
+     property and destroys only the link to the company. If the real
+     data does not beat the shuffle, the fundamental leg is decoration.
+- **Benchmark:** buy-and-hold computed from **daily** bars, not weekly.
+  Weekly bucketing moved the 2005-2009 benchmark by half a point and
+  that error should not propagate into new work.
+- **Significance:** active t against the index, reported alongside every
+  figure. Given how many looks this project has taken, nothing below
+  t = 3.0 will be described as a finding.
+
+### What would count as each outcome
+- **Support:** top quintile beats both controls in derivation *and*
+  holdout, at t > 3.0.
+- **Refuted:** fails either control, or survives derivation and dies in
+  holdout — which is the outcome I expect.
+- **Void:** if the fundamentals join turns out to leak, the arm is
+  discarded rather than patched and re-read.
