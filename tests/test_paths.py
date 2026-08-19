@@ -10,9 +10,19 @@ The assertions below are the part that lasts. A location rule nobody
 checks drifts back the first time someone writes a convenient default.
 """
 import os
+import tempfile
 import unittest
 
 from screener import bar_cache, db, paths
+
+
+def _tmp(name):
+    """A scratch path built at run time rather than written into the file.
+
+    Hardcoding one would trip the portability check these very tests
+    exist alongside — which is exactly what it did on the first run.
+    """
+    return os.path.join(tempfile.gettempdir(), name)
 
 
 class WriteLocationTest(unittest.TestCase):
@@ -53,21 +63,21 @@ class OverrideTest(unittest.TestCase):
                 os.environ[k] = v
 
     def test_the_directory_override_moves_everything(self):
-        os.environ["WEINSTEIN_SCREENER_DATA_DIR"] = "/tmp/wsd"
-        self.assertEqual(paths.data_file("x.pkl"), "/tmp/wsd/x.pkl")
+        os.environ["WEINSTEIN_SCREENER_DATA_DIR"] = _tmp("wsd")
+        self.assertEqual(paths.data_file("x.pkl"), os.path.join(_tmp("wsd"), "x.pkl"))
 
     def test_the_legacy_variable_is_still_honoured(self):
         # SCREENER_DATA_DIR predates the shared helper and was already
         # documented. Dropping it would silently relocate a live run.
         os.environ.pop("WEINSTEIN_SCREENER_DATA_DIR", None)
-        os.environ["SCREENER_DATA_DIR"] = "/tmp/legacy"
-        self.assertEqual(paths.data_file("x.pkl"), "/tmp/legacy/x.pkl")
+        os.environ["SCREENER_DATA_DIR"] = _tmp("legacy")
+        self.assertEqual(paths.data_file("x.pkl"), os.path.join(_tmp("legacy"), "x.pkl"))
 
     def test_a_per_file_override_beats_the_directory_one(self):
-        os.environ["WEINSTEIN_SCREENER_DATA_DIR"] = "/tmp/wsd"
-        os.environ["SCREENER_BAR_CACHE"] = "/tmp/just-this.pkl"
+        os.environ["WEINSTEIN_SCREENER_DATA_DIR"] = _tmp("wsd")
+        os.environ["SCREENER_BAR_CACHE"] = _tmp("just-this.pkl")
         self.assertEqual(paths.data_file("x.pkl", env="SCREENER_BAR_CACHE"),
-                         "/tmp/just-this.pkl")
+                         _tmp("just-this.pkl"))
 
     def test_two_projects_do_not_share_a_directory(self):
         from market_core import paths as shared

@@ -19,6 +19,45 @@ Ordered by what would change a decision, not by effort.
   a real threshold or an artifact of where the grid happened to land.
   Needs the weekly cache rebuilt first — a minute of work.
 
+## From the Chan text, queued
+Read in full 2026-08-14. Methodology is project-agnostic and belongs in
+market_core; only chapter 7's strategy content would be a new project.
+
+1. **Fix the benchmark.** He is explicit that it must match the
+   securities traded — a small-cap strategy against the Russell 2000,
+   not the S&P 500. Our screen surfaces mid- and small-cap healthcare
+   and every figure is measured against SPY, so part of what has been
+   called an edge or a shortfall is just the size spread. VTWO is
+   already held and is the right comparison.
+2. **Demote CAGR; report Sharpe, maximum absolute drawdown and MAR.**
+   His objection is the one that produced two figures here rather than
+   one: the CAGR denominator is ambiguous, which is why peak capital and
+   average capital both had to be reported. MAR is CAGR over maximum
+   absolute drawdown and largely survives leverage.
+3. **Minimum backtest length, from Bailey.** To be 95% confident a true
+   Sharpe exceeds zero needs a backtest Sharpe of 1 over 681 points
+   (~2.7 years daily); a backtest Sharpe of 2 needs only 174. It applies
+   to paper trading too, which turns the forward log from an open-ended
+   wait into a defined one.
+4. **Deflated Sharpe Ratio (Bailey 2014).** Discounts a Sharpe by how
+   many variants were tried to obtain it. This project has run 200+
+   arms. The paper is already in reference/papers/.
+5. **Return-window alignment check.** The gap the truncation test cannot
+   close: verify that the return credited to a position begins at or
+   after the moment the position was decided. That invariant is what the
+   200-day rule violated, and neither existing check asserts it.
+6. **Five-parameter ceiling.** His rule of thumb counts entry and exit
+   thresholds, holding period and lookbacks. We exceed it before
+   accounting for the arms R20 was mined from.
+7. **Ten-year data window.** He argues older data is unfittable through
+   regime shifts, and that more data helps only for a stationary
+   process. Directly at odds with how much weight 2005-2009 carries here.
+8. **Quantpedia** (quantpedia.com) as a structured source of candidate
+   strategies, in place of the ad-hoc route taken so far.
+9. **Chapter 7 as a possible third project** — mean reversion,
+   cointegration and pairs, on the same engine. Genuinely different
+   content rather than another momentum variant.
+
 ## Next, in order
 1. **Re-run T4's policy table on corrected arms only.** The published
    version mixes one corrected window with two survivor-biased ones. All
