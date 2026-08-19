@@ -23,11 +23,13 @@ import os
 import pickle
 import time
 
-from . import data_fetch, universe
+from . import data_fetch, paths, universe
 
-CACHE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "weekly_bars.pkl"
-)
+# Not inside the checkout. This file reached 334MB here and 1.7GB on the
+# sibling project, and the checkout sits in a synced folder — a sync
+# client rewriting a cache mid-run is the same collision that cost a
+# four-hour sweep and left two arms silently short of rows.
+CACHE_PATH = paths.data_file("weekly_bars.pkl", env="SCREENER_BAR_CACHE")
 
 # The server's ceiling, and about 23 years of weekly bars — as far back
 # as any backtest here can reach. See docs/webull-api-reference.md.
