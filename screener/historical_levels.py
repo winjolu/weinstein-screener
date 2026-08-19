@@ -1,36 +1,13 @@
-"""Rolling historical high/low levels over configurable lookback windows."""
+"""Re-exported from the shared package; implemented in market_core.historical_levels.
 
-DEFAULT_WINDOWS = {
-    # Expressed in bar counts, not calendar time. These assume weekly
-    # bars, so "5D" is approximated as the single most recent weekly bar —
-    # weekly OHLCV can't give a true 5-trading-day high/low, only daily
-    # bars would have that precision.
-    "5D": 1,
-    "2W": 2,
-    "52W": 52,
-    "all_time": None,  # None means "every bar passed in"
-}
+Rebinds the module rather than re-exporting its names. A star import
+copies each name into a fresh namespace, so anything patching
+screener.historical_levels in a test would leave real callers bound to the
+original — the failure that surfaced as an unexplained HTTP 403 when
+sharadar.py moved.
+"""
+import sys
 
+from market_core import historical_levels as _shared
 
-def get_historical_high_low(bars, windows=None):
-    """I return the highest high and lowest low over each rolling window.
-
-    :param bars: OHLCV dicts, oldest first.
-    :param windows: {label: bar_count}, where bar_count=None means "all
-        bars". Defaults to DEFAULT_WINDOWS.
-    :return: {label: {"high": ..., "low": ...}}
-    """
-    if windows is None:
-        windows = DEFAULT_WINDOWS
-
-    result = {}
-    for label, window in windows.items():
-        subset = bars if window is None else bars[-window:]
-        if not subset:
-            result[label] = {"high": None, "low": None}
-            continue
-        result[label] = {
-            "high": max(b["high"] for b in subset),
-            "low": min(b["low"] for b in subset),
-        }
-    return result
+sys.modules[__name__] = _shared
