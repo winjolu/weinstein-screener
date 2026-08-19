@@ -279,11 +279,23 @@ class ArchivalGuardTest(unittest.TestCase):
         self.assertEqual(held, 1)
         self.assertEqual(sharadar.frozen_before("prices", db_path=path), "2025-08-11")
 
-    def test_an_unfrozen_table_permits_anything(self):
-        # No watermark means no claim about what is archival. Refusing by
-        # default would block the first legitimate bulk load.
+    def test_an_unfrozen_table_is_refused_rather_than_waved_through(self):
+        # This assertion used to read the other way, permitting a write
+        # when no watermark existed. That is precisely how the guard sat
+        # inert for weeks: an absent watermark is indistinguishable from
+        # a guard nobody armed, and failing open looks identical to
+        # passing. The shared implementation refuses, and adopting it is
+        # what made this test fail rather than any change of mine.
         path = self._db()
-        sharadar.assert_writable("prices", "1990-01-01", db_path=path)
+        with self.assertRaises(sharadar.ArchivalWrite):
+            sharadar.assert_writable("prices", "1990-01-01", db_path=path)
+
+    def test_a_genuine_first_load_can_say_so_explicitly(self):
+        # The escape hatch has to exist or the first bulk load is
+        # impossible, but it must be asked for rather than assumed.
+        path = self._db()
+        sharadar.assert_writable("prices", "1990-01-01", db_path=path,
+                                 unfrozen_ok=True)
 
     def test_reaching_below_the_watermark_is_refused(self):
         path = self._db()
