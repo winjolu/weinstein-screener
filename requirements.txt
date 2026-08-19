@@ -1,2 +1,7 @@
 webull-openapi-python-sdk
 python-dotenv
+
+# Shared data layer and archival guards. Editable install from a local
+# checkout so both screener projects run the same code:
+#   pip install -e ~/market-data/market-core
+-e ~/market-data/market-core
