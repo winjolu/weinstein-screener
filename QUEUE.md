@@ -60,13 +60,18 @@ market_core; only chapter 7's strategy content would be a new project.
    content rather than another momentum variant.
 
 ## Next, in order
-0. **Re-run every published arm under a pinned configuration.** The W2
-   and W3 portfolio figures no longer reproduce — `weekly_sharadar.pkl`
-   is a dangling symlink into a deleted scratch directory, and the same
-   trades now return +10.38% where +12.09% is published. Trade-level
-   data is intact; only the portfolio layer is affected. Pin the cache,
-   record its identity against each arm, then restate the edge column
-   against IWM in the same pass.
+0. ~~**Re-run every published arm under a pinned configuration.**~~ Done
+   2026-08-20 as B2. Ten arms re-run on a rebuilt 10,227-ticker cache,
+   reconstructed universes and one recorded configuration. W2 arms
+   reproduce within 0.4%, W3 within 6.1%. No arm reaches |t| = 2 against
+   SPY or IWM. The eleven T5b/T5c arms are closed by loss — the entry
+   band they swept was never committed to tracked code.
+
+0b. **Rebuild the daily cache and re-run T3.** The daily cache is a
+   different vintage too (26-27% of T3 trades disagree with it). About
+   15 minutes to rebuild windowed to 2004-2011, then 67 minutes of arms.
+   The T3 conclusion survived recomputation on every arm checked, so
+   this is confirmation rather than discovery.
 1. **Re-run T4's policy table on corrected arms only.** The published
    version mixes one corrected window with two survivor-biased ones. All
    six w2 arms now exist, so this is arithmetic rather than compute.

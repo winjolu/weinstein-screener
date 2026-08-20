@@ -114,7 +114,8 @@ not yet run · **defect** revealed a bug rather than a result
 
 | id | question | outcome |
 |---|---|---|
-| B1 | is the SPY benchmark the wrong index, and by how much | **partially closed** — size spread measured (IWM−SPY: +0.32, −1.40, **−6.85** points by window). Restatement blocked: the published portfolio figures no longer reproduce |
+| B1 | is the SPY benchmark the wrong index, and by how much | **closed** — size spread measured (IWM−SPY: +0.32, −1.40, **−6.85** points by window) |
+| B2 | restate every published arm against a size-matched benchmark | **closed** — 10 arms re-run on a rebuilt cache under one pinned, recorded configuration. Edges move by the size spread; **no arm reaches \|t\| = 2** against either index. Outcome as pre-registered |
 
 ## K — machine learning
 
@@ -141,6 +142,10 @@ not yet run · **defect** revealed a bug rather than a result
   figure depends on the data *and* the configuration, and recording only
   the data is half a measure. The same trades yield +9.54% to +18.69%
   absolute CAGR on account settings alone.
+- Reproduce the count before trusting the figure. The re-run's W2 arms
+  landed within 0.4% of their originals, which is what said the universe
+  reconstruction was sound; the W3 arms came in 31-90% high and that is
+  what caught a liquidity threshold five times too loose.
 - Two numbers that cannot both be true beat any amount of reasoning.
   +5.03% a year beside a 98.3% drawdown is what exposed the vintage
   mismatch, after the risk had been noticed in writing and set aside.

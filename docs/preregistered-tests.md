@@ -4262,3 +4262,101 @@ is why the daily build is scoped to the window T3 needs rather than the
 full history, which would be about 6.6GB. And the weekly rebuild now
 overwrites the live cache in place; it is already the wrong vintage, so
 nothing is lost, but it should be copied aside first.
+
+---
+
+# B2 RESULT — the published arms, re-run and recorded
+
+Run 2026-08-20 against a rebuilt cache, reconstructed universes and one
+pinned configuration, every part of it recorded this time. These
+supersede the figures above; the old ones are kept as a record and are
+not comparable, because the configuration behind them was never written
+down.
+
+**Configuration, pinned and stored in `portfolio_runs` beside every
+figure:** $100,000 capital, $1,000 a position, cash credited 3%,
+always-parked in SPY at 0.11% a leg, no risk-based sizing.
+
+**Cache:** 10,227 tickers, 5,224,336 weekly bars, fingerprint recorded
+per arm in `run_provenance`. Every arm passes the vintage check at zero
+disagreements and zero uncovered tickers — the first time trades and
+bars in this project have provably come from one vintage.
+
+| arm | trades | CAGR (abs) | SPY B&H | vs SPY | t | IWM B&H | vs IWM | t | max abs DD |
+|---|---|---|---|---|---|---|---|---|---|
+| w2_2005_R20 | 5,692 | +3.24% | +3.58% | -0.34 | -0.12 | +5.22% | **-1.98** | -0.45 | -45.3% |
+| w2_2005_M9 | 46,030 | -1.67% | +1.88% | -3.55 | -0.44 | +2.73% | **-4.41** | -0.60 | -38.2% |
+| w2_2010_R20 | 7,895 | +9.45% | +13.94% | -4.49 | -0.38 | +11.41% | **-1.95** | -0.18 | -42.0% |
+| w2_2010_M9 | 89,160 | +13.01% | +12.53% | +0.48 | 0.34 | +10.40% | **+2.61** | 0.49 | -27.6% |
+| w3_2010_R20 | 3,004 | +13.60% | +14.27% | -0.66 | 0.02 | +11.42% | **+2.18** | 0.39 | -32.4% |
+| w3_2010_M9 | 54,987 | +11.10% | +12.53% | -1.43 | -0.39 | +10.40% | **+0.70** | -0.11 | -29.6% |
+| w2_2021_R20 | 6,235 | +8.72% | +14.73% | -6.01 | 0.02 | +8.63% | **+0.10** | 0.40 | -55.2% |
+| w2_2021_M9 | 40,205 | +2.93% | +14.97% | -12.04 | -1.71 | +8.93% | **-6.00** | -0.98 | -30.6% |
+| w3_2021_R20 | 3,870 | +1.18% | +14.73% | -13.55 | -1.02 | +8.63% | **-7.44** | -0.67 | -50.2% |
+| w3_2021_M9 | 30,724 | +3.76% | +14.97% | -11.21 | -1.67 | +8.93% | **-5.16** | -0.89 | -28.3% |
+
+| arm | published trades | re-run trades | published CAGR (abs) | re-run CAGR (abs) |
+|---|---|---|---|---|
+| w2_2005_R20 | 5,670 | 5,692 (+0.4%) | +4.57% | +3.24% |
+| w2_2005_M9 | 45,899 | 46,030 (+0.3%) | -0.24% | -1.67% |
+| w2_2010_R20 | 7,885 | 7,895 (+0.1%) | +7.02% | +9.45% |
+| w2_2010_M9 | 89,070 | 89,160 (+0.1%) | +12.82% | +13.01% |
+| w3_2010_R20 | 2,878 | 3,004 (+4.4%) | +14.67% | +13.60% |
+| w3_2010_M9 | 51,823 | 54,987 (+6.1%) | +11.28% | +11.10% |
+| w2_2021_R20 | 6,225 | 6,235 (+0.2%) | +12.09% | +8.72% |
+| w2_2021_M9 | 40,067 | 40,205 (+0.3%) | +4.35% | +2.93% |
+| w3_2021_R20 | 3,668 | 3,870 (+5.5%) | -0.07% | +1.18% |
+| w3_2021_M9 | 29,528 | 30,724 (+4.1%) | +5.74% | +3.76% |
+
+## What it says
+
+**No arm reaches |t| = 2 against either benchmark.** The largest is
+−1.71. That is the fourth independent way of arriving at the same
+conclusion, and it is the outcome pre-registered before the run.
+
+**The size-matched benchmark does exactly what B1 predicted.** Against
+SPY the 2021 arms lose by 6 to 13.6 points; against IWM they lose by 0.1
+to 7.4, and `w2_2021_R20` goes from −6.01 to **+0.10** — a tie rather
+than a loss. Over 2010-2020 it works the other way: three of four arms
+that lose to SPY *beat* IWM, by 0.70 to 2.61 points.
+
+Both directions are reported because both are real. The benchmark was
+wrong, correcting it was right, and it buys a fairer comparison rather
+than a finding — every t-statistic remains indistinguishable from noise.
+
+**The untuned rule still does not win.** M9 beats IWM in 2010-2020 by
+2.61 points and loses 2021-2026 by 6.00. R20 is the same story with
+larger swings. Nothing here changes the standing conclusion.
+
+## Fidelity of the reconstruction
+
+The six W2 arms land within **0.4%** of their original trade counts —
+reconstructed universes, a rebuilt cache and independently re-derived
+rule constants reproducing to a fraction of a percent. That is the
+strongest evidence available that the universe rule and the arm
+definitions were correctly recovered.
+
+The four W3 arms land within 4.1% to 6.1%. They are looser for a reason
+worth recording: my first attempt came in 31% to 90% high because I used
+the screener's `MIN_AVG_WEEKLY_DOLLAR_VOLUME` ($1M a week) where W3's
+rule is **$1M a day, median, over the full prior year** — five times
+stricter, a different statistic and a different window. Corrected, the
+liquid universes are 2,362 and 3,036 names against 3,331 and 4,058 on
+the wrong threshold. The residual 4-6% is the quantisation-safe
+liquidity rule declining to measure names the original admitted, which
+is deliberate.
+
+## What is not here
+
+The eleven T5b and T5c arms are absent and will stay absent. The entry
+band they swept was never committed to tracked code and existed only in
+a scratch script, so there is no definition to run. That family is
+closed by loss rather than by result.
+
+## The one number that matters most
+
+Every arm above records its bar cache path, a fingerprint of that cache,
+its universe size, its rule and its full account configuration. Ten of
+ten come back `ok` from `unreproducible_arms()`, against 237 older arms
+that come back `no_provenance`. Whatever else this run produced, that is
+the part that stops it happening again.
