@@ -3637,3 +3637,276 @@ expected and a negative one as obvious.
   holdout — which is the outcome I expect.
 - **Void:** if the fundamentals join turns out to leak, the arm is
   discarded rather than patched and re-read.
+
+---
+
+## D4 — the liquidity floor and quantised volume
+
+Registered and run 2026-08-19, after finding that `filter_by_liquidity`
+scores `close * volume`. That product is a level, not a ratio, so unlike
+a return it has nothing to cancel a scale error. The question was whether
+the floor had been admitting names it exists to exclude, which would put
+W3's published conclusion in doubt — dollar volume is the one measure
+where a price defect cannot divide out.
+
+**Registered expectation: the floor is contaminated and W3 has to be
+withdrawn.** That is not what happened, and the reasoning that produced
+the expectation was wrong in an instructive way.
+
+### What the data actually does
+
+Vendor prices arrive already adjusted. The adjustment is correct: for a
+reverse split, historical prices are divided by the split factor and
+historical volumes multiplied by it, so `close * volume` is invariant and
+liquidity looks the same either side of the split.
+
+It stops being invariant when the multiplied volume falls below one
+share, because volume is stored as a whole number and rounds up to a
+floor of 1 instead of holding its true fractional value. The price keeps
+its full inflated value; the volume it should be multiplied against does
+not.
+
+JAGX is the clearest case. Seven reverse splits between 2018 and 2026
+give a cumulative factor near 8e-11, so its May 2015 close is carried at
+$84,096,088,812 against a volume of exactly 1. Sixteen consecutive bars
+around its 1-for-70 split in June 2019 all sit at volume 1, each
+reporting $69M to $210M of turnover for a company that trades about
+$100,000 a day now that the splits are behind it.
+
+This is not a tail case. **2,790,333 of the archive's 46,254,680 price
+bars sit on the volume floor (6.03%), across 5,265 of 21,941 tickers.**
+
+| share of a ticker's bars on the floor | tickers |
+|---|---|
+| ≥ 10% | 5,265 |
+| ≥ 25% | 2,956 |
+| ≥ 50% | 1,114 |
+| ≥ 75% | 195 |
+
+### Why the floor survived it anyway
+
+The inflation is real but it starts from a penny-stock price, so it
+lands in the thousands rather than the millions. Measured over six
+scoring windows spanning 1998 to 2025:
+
+| scoring window | quantised names | median score | clearing the $1M floor |
+|---|---|---|---|
+| 1998 Q4 | 934 | $11,303 | 3 (0.3%) |
+| 2003 Q4 | 634 | $7,171 | 8 (1.3%) |
+| 2009 Q4 | 552 | $3,675 | 5 (0.9%) |
+| 2015 Q4 | 389 | $4,126 | 13 (3.3%) |
+| 2020 Q4 | 199 | $5,447 | 11 (5.5%) |
+| 2025 Q1 | 170 | $6,183 | 2 (1.2%) |
+
+So the defect pushes these names *up*, and still not far enough to reach
+a floor set in the millions. Checked directly against the W3 arms: of
+the 91 quantised tickers in the 2010 all-names arm, 90 were dropped by
+the floor, and their median score was **$6,350** against a $1,000,000
+threshold. The 2021 arm behaves the same way — 30 of 34 dropped, median
+score $1,770.
+
+| arm | tickers | quantised | their trades | mean return, clean | mean return, quantised |
+|---|---|---|---|---|---|
+| w2_2010_R20 | 2,467 | 91 (3.7%) | 476 (6.0%) | +2.675% | +8.222% |
+| w3_2010_R20 | 1,150 | 1 (0.1%) | 1 (0.0%) | +4.308% | −33.466% |
+| w2_2021_R20 | 2,579 | 34 (1.3%) | 98 (1.6%) | +1.033% | +29.909% |
+| w3_2021_R20 | 1,610 | 4 (0.2%) | 8 (0.2%) | +0.977% | −11.659% |
+
+All figures above are absolute per-trade returns, not an edge over the
+index.
+
+**W3's published conclusion stands unchanged.** The liquidity floor did
+not admit these names; it removed almost all of them, on genuinely low
+scores.
+
+### The returns on these names are not defective either
+
+The all-names arms show quantised tickers averaging +8.2% and +29.9%
+absolute per trade against clean means near +1%, which looks like
+contamination and is not. Of **3,295 trades on quantised-volume tickers
+across four arms, 5 straddle a suspect-units jump** that no recorded
+corporate action explains — and those five average −27% absolute. The
+median trade on a quantised ticker is *negative* (−14.95% and −11.13%);
+the mean is carried by a small number of genuine winners, the largest
+being APLD's +4,058% absolute, already corroborated at 138x normal
+volume.
+
+Reverse-splitting is a marker for failing microcaps, and failing
+microcaps are high-variance. That is a property of the names, not of the
+data.
+
+### What is actually at risk
+
+A *threshold* on dollar volume survives this. A *ranking* does not. The
+handful of names that clear the floor clear it by factors of 10^3 to
+10^9 — JAGX scores $1.13 quadrillion a week in the 2020 window — so they
+sort to the very top of any list ordered by liquidity. Nothing in this
+project ranks by dollar volume today. The moment something does, it
+would take these first.
+
+### The fix
+
+`market_core.liquidity` replaces the arithmetic. `dollar_volume()`
+returns **None** rather than a number when the bars it would be computed
+from are on the storage floor, because the true volume was destroyed by
+rounding and cannot be recovered from adjusted data. Quantised bars are
+excluded from the mean, and a name whose window is more than a quarter
+quantised is reported as *unmeasurable* rather than *thin* — a data
+fault should not be recorded as a judgement about tradability.
+
+`filter_by_liquidity` now delegates to it. 19 tests, each confirmed to
+fail against three separate mutations of the guard.
+
+### What this cost and what it bought
+
+The registered expectation was wrong and the published result needed no
+correction, which makes this a negative result. It was still worth
+running: the defect is real, it is large, and the reason it did no
+damage here is a property of penny-stock prices rather than anything the
+filter was designed to do. That is luck, and luck that is not written
+down gets spent twice.
+
+---
+
+## D5 — return-window alignment (Chan, queue item 5)
+
+Registered and run 2026-08-19. Chan's point is that a backtest can pass
+every look-ahead check and still credit a position with return from
+before the decision that bought it. `market_core.lookahead` cannot see
+this: truncation catches a rule that *consults* future bars, and a rule
+that decides correctly then books the wrong window decides identically
+either way. Only the accounting differs. That is the gap the 200-day
+rule fell through, where the leaky and the lagged versions both pass
+truncation at 2,220 against 2,219 positions.
+
+**Invariant:** the bar a position's return starts from must be at or
+after the bar its decision was made on.
+
+### The tolerance is not a fudge
+
+Bar timestamps are not decision timestamps. Across all 1,785,881 trades
+the distribution is sharply bimodal: 47.57% enter exactly on the
+decision date, 52.43% enter one or two days before it, and **zero**
+enter between one week and several months after. That gap is the
+signature of a weekly bar stamped at its open being evaluated at a
+checkpoint on its close. A tolerance of one bar interval separates the
+convention from the fault; anything beyond it is a real violation.
+
+### Result
+
+**475 of 1,608,633 trades in the modern arms violate it — 0.030%.**
+
+| family | arms | violations | note |
+|---|---|---|---|
+| w2 / w3 / t5b / t5c / t3 | 26 | **0** | every published survivorship, band and daily-bar figure |
+| b* / wf* / t1* | 66 | 1–7 each | 147 tickers, leads of 139–391 days |
+| s1 / s1r pit_all | 4 | 711 and 136 | already withdrawn for lost rows |
+| earliest exploratory | 24 | 60–90% of trades | `as_of_date` logged as the run date; invariant unmeasurable |
+
+**Every arm behind a published conclusion is clean.** That is the result
+worth having, and it was not knowable before running this.
+
+### Direction, stated carefully
+
+Aggregated over the modern arms the violating trades average **+15.13%
+absolute** against **+2.29%** for the rest — a 12.84-point excess, the
+direction a genuine leak produces. That aggregate is misleading on its
+own and the per-arm figures say why: the two arms with large violation
+counts show *negative* excess (−0.56 and −1.24 points), and the whole
+aggregate is carried by three trades in `b22_test_M9_trend_gated` at a
++140.37-point excess. So there is leak-shaped bias present, concentrated
+in a handful of trades, moving the overall mean by roughly four
+thousandths of a point.
+
+My "first checkpoint" hypothesis for the mechanism was **wrong** — only
+10.3% of violations sit at an arm's opening checkpoint. The mechanism is
+still unidentified and is recorded in known-gaps rather than guessed at.
+
+### The check
+
+`market_core.alignment` — `violations()`, `report()`, `check()`. It
+reports the excess as well as the count, because a check that only ever
+says "failed" gets switched off. 20 tests, confirmed to fail against
+three mutations, including one that deduplicated violations by content
+and would have collapsed two identical trades into one.
+
+`tests/test_return_alignment.py` pins the 26 published arms and asserts
+the withdrawn arm still violates, so the check cannot quietly stop
+detecting anything. It also asserts it examined at least 20 arms — a
+test that passes because it looked at nothing reads as protection.
+
+---
+
+## B1 — the benchmark is the wrong index, and how much that is worth
+
+Chan's objection, queue item 1: a benchmark has to match the securities
+traded. This screen surfaces mid- and small-cap names and every figure in
+this file is measured against SPY, so some part of every "edge" and every
+"shortfall" is the size spread rather than the strategy.
+
+Measured on daily dividend-adjusted bars over the declared windows:
+
+| window | SPY | IWM | IJR | MDY | IWM − SPY |
+|---|---|---|---|---|---|
+| 2005-2009 | +0.48% | +0.80% | +1.55% | +3.24% | **+0.32pt** |
+| 2010-2020 | +13.72% | +12.32% | +12.85% | +12.35% | **−1.40pt** |
+| 2021-2026 | +12.99% | +6.13% | +7.80% | +9.27% | **−6.85pt** |
+
+All absolute CAGR, not an edge over anything.
+
+IWM is the right instrument rather than VTWO, which Chan's argument would
+otherwise favour: VTWO's history starts 2010-09-22 and cannot reach the
+2005 window at all. IWM covers 2000-05-26 onward. Its adjustment is clean
+— `closeadj/close` runs 0.7131 to 1.0000 monotonically over 26 years,
+about 1.3% a year of dividend accrual, which is what a small-cap ETF
+should look like and is emphatically not the FTHI failure mode.
+
+**The 2021 window is where this bites.** Published edges there run from
+−0.06% to −12.23% against SPY. Against a size-matched index every one of
+them improves by 6.85 points, which would turn the R20 all-names arm from
+a tie into a win.
+
+### The parking confound, and why it is smaller than it looks
+
+The always-parked arms hold SPY whenever cash is idle, so measuring them
+against IWM credits the strategy for a large-cap holding it actually
+made. That objection is real and I expected it to sink the restatement.
+It does not, for a reason worth recording: **deployment is 99.2%**. The
+account is fully invested and turning away 3,832 of 6,225 signals for
+want of capital, so there is almost nothing being parked. Swapping the
+parking vehicle from SPY to IWM moves the result by about one point —
+and moves it *up*, from +10.38% to +11.41%. The confound exists, it is
+roughly a sixth of the size spread, and it runs in the strategy's favour
+rather than against it.
+
+### Why the table is not restated here
+
+**The published portfolio-level figures cannot currently be reproduced.**
+Against the same trades, the same code and either surviving bar cache,
+`w2_2021_R20` returns +10.38% or +10.55% where the published figure is
++12.09%. A sweep over capital, stake and cash-yield does not close the
+gap; the closest is 1.71 points short, and the result turns out to depend
+only on the capital-to-stake ratio, so there is no configuration left to
+find.
+
+The cause is that `~/market-data/cache/weekly_sharadar.pkl` is a
+**dangling symlink** into a scratch directory that no longer exists. That
+was the cache the W2 and W3 arms were computed against. Every trade is
+still in the database with its entry price, exit price and dates intact,
+which is why the gap is 1.7 points rather than total — what is missing is
+the bar series used to mark the 77 still-open positions and to run the
+SPY parking leg.
+
+So the size spread above is solid and the restated edge column is not.
+Restating it needs every arm re-run under a pinned configuration against
+a cache that will still be there afterwards. Registered as the next
+runnable item rather than guessed at.
+
+### What this changes about how arms get recorded
+
+An arm that cannot be recomputed is a claim rather than a result. The
+trade table records `parameter_set` but nothing about the data the run
+consumed, so nothing failed loudly when the cache went away — the figures
+simply became unverifiable, and stayed quotable. Recording a cache
+identity and a row count against each arm would have caught this the
+first time an arm was re-read.

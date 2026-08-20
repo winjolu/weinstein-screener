@@ -19,6 +19,7 @@ convention as it actually emerged.
 | **M** | **Mechanism** — infrastructure and modelling corrections rather than rule changes: sizing, costs, drawdown measurement. M7-M9 break the pattern by being rule tests, which is a naming mistake I did not fix in time. |
 | **S** | **Overloaded, and a known defect.** S1-S2 are *data source* tests. S7 is the *short* side. Rename S7 to SH1 when next touched. |
 | **D** | **Data integrity** — ticker identity, delisting census, survivorship bounding. |
+| **B** | **Benchmark** — what the strategy is measured against. |
 | **K** | **K-nearest neighbour** — the single machine-learning test. |
 
 ## Status legend
@@ -106,6 +107,14 @@ not yet run · **defect** revealed a bug rather than a result
 | D1 | ticker contamination detector | **defect** — first version was 91% false positives; a new CIK is not a new company |
 | D2 | delisting census from SEC filings | 36,346 notices, 11,448 companies; **60% were acquired, not failed** |
 | D3 | bounding the survivorship damage | 2% of trades going to zero erases the edge in two windows of three |
+| D4 | does quantised volume corrupt the dollar-volume liquidity floor | **closed** — defect is real and large (6% of all bars), W3 unaffected. A threshold survives it; a ranking would not |
+| D5 | does any arm credit return from before the decision that bought it | **closed** — 0.030% of trades, and **zero** in every published arm. The gap truncation cannot reach |
+
+## B — benchmark
+
+| id | question | outcome |
+|---|---|---|
+| B1 | is the SPY benchmark the wrong index, and by how much | **partially closed** — size spread measured (IWM−SPY: +0.32, −1.40, **−6.85** points by window). Restatement blocked: the published portfolio figures no longer reproduce |
 
 ## K — machine learning
 
@@ -125,3 +134,13 @@ not yet run · **defect** revealed a bug rather than a result
 - Check the worst case after any change to which trades qualify. Three
   stop-placement defects were invisible in the mean.
 - Register before running. The whole file is worthless otherwise.
+- A level is not a ratio. Returns divide a scale error out; dollar
+  volume, market cap and any other product of price and quantity do not.
+  Check those separately after any finding about price integrity.
+- An arm that cannot be recomputed is a claim, not a result. Record what
+  data a run consumed, not just its parameters. A cache vanished and the
+  W2/W3 figures became unverifiable without anything failing.
+- Write down why a defect did *no* damage. D4's floor survived because
+  penny-stock prices inflate into the thousands rather than the
+  millions, which is luck rather than design — and unrecorded luck gets
+  spent twice.

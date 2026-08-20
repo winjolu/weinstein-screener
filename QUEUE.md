@@ -8,6 +8,9 @@ Ordered by what would change a decision, not by effort.
 - **W2b** — significance on active return. Nothing ever cleared t = 2,
   before or after correction.
 - **W3** — liquidity floor. Helps one window, hurts the other. Not a fix.
+  Re-examined 2026-08-19 as D4 against a volume-quantisation defect and
+  **unchanged** — the floor dropped the affected names rather than
+  admitting them.
 - **T3** — daily bars. Every arm worse than its weekly equivalent.
 - **T5b** — the entry band on universe B. A plateau at 20-30%.
 - **T5c** — random thinning. The band has a mechanism of its own.
@@ -23,12 +26,11 @@ Ordered by what would change a decision, not by effort.
 Read in full 2026-08-14. Methodology is project-agnostic and belongs in
 market_core; only chapter 7's strategy content would be a new project.
 
-1. **Fix the benchmark.** He is explicit that it must match the
-   securities traded — a small-cap strategy against the Russell 2000,
-   not the S&P 500. Our screen surfaces mid- and small-cap healthcare
-   and every figure is measured against SPY, so part of what has been
-   called an edge or a shortfall is just the size spread. VTWO is
-   already held and is the right comparison.
+1. **Fix the benchmark.** Measured 2026-08-19 as B1: the size spread is
+   +0.32, −1.40 and **−6.85** points by window, so the 2021 conclusions
+   move materially. IWM rather than VTWO — VTWO starts 2010-09 and
+   cannot reach the 2005 window. Restating the edge column is blocked
+   on the re-run below.
 2. **Demote CAGR; report Sharpe, maximum absolute drawdown and MAR.**
    His objection is the one that produced two figures here rather than
    one: the CAGR denominator is ambiguous, which is why peak capital and
@@ -42,10 +44,9 @@ market_core; only chapter 7's strategy content would be a new project.
 4. **Deflated Sharpe Ratio (Bailey 2014).** Discounts a Sharpe by how
    many variants were tried to obtain it. This project has run 200+
    arms. The paper is already in reference/papers/.
-5. **Return-window alignment check.** The gap the truncation test cannot
-   close: verify that the return credited to a position begins at or
-   after the moment the position was decided. That invariant is what the
-   200-day rule violated, and neither existing check asserts it.
+5. ~~**Return-window alignment check.**~~ Done 2026-08-19 as D5.
+   `market_core.alignment` asserts it; every published arm is clean at
+   0 violations, against 0.030% across the modern arms overall.
 6. **Five-parameter ceiling.** His rule of thumb counts entry and exit
    thresholds, holding period and lookbacks. We exceed it before
    accounting for the arms R20 was mined from.
@@ -59,6 +60,13 @@ market_core; only chapter 7's strategy content would be a new project.
    content rather than another momentum variant.
 
 ## Next, in order
+0. **Re-run every published arm under a pinned configuration.** The W2
+   and W3 portfolio figures no longer reproduce — `weekly_sharadar.pkl`
+   is a dangling symlink into a deleted scratch directory, and the same
+   trades now return +10.38% where +12.09% is published. Trade-level
+   data is intact; only the portfolio layer is affected. Pin the cache,
+   record its identity against each arm, then restate the edge column
+   against IWM in the same pass.
 1. **Re-run T4's policy table on corrected arms only.** The published
    version mixes one corrected window with two survivor-biased ones. All
    six w2 arms now exist, so this is arithmetic rather than compute.

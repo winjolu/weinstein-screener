@@ -515,3 +515,41 @@ Three other things were wrong or missing:
 than from either project. Nothing enforces that yet — the read-only
 opens make accidental writes harder, not impossible, and two writers
 remains a live hazard.
+
+---
+
+## The 592 misaligned trades have no identified mechanism
+
+D5 found 475 trades in the modern arms (0.030%) whose return window
+opens up to 391 days before the decision that bought them, across 147
+tickers. Every published arm is clean, so nothing quoted anywhere rests
+on them, and `market_core.alignment` now asserts the invariant so this
+cannot spread unnoticed.
+
+What is missing is *why*. My hypothesis — that the engine finds a
+breakout that already happened at an arm's opening checkpoint and dates
+the entry to the signal bar — accounts for only 10.3% of them. The
+remaining 89.7% sit at ordinary mid-window checkpoints and I do not know
+what produces them.
+
+Worth noting before anyone spends a day on it: the affected arms are
+`b*`, `wf*` and `t1*`, at one to seven trades each out of several
+thousand. That distribution is more consistent with a rare data
+condition on particular tickers — EXE, CBC and IX account for 66 of the
+592 occurrences — than with a systematic engine fault. The next step is
+to take those three names and trace one trade through the engine, rather
+than to re-read the checkpoint loop looking for it.
+
+## The exploratory arms cannot be audited for alignment
+
+Twenty-four early arms (`study_*`, `gate_*`, `e1_*`, `e2_*`, `e3_*`,
+`v2_*`, `big_*`, `trail_*`, `partial_*`, `pivot_length=*`,
+`full_exit_at_target`, `let_it_all_run`) recorded `as_of_date` as the
+date the backtest was run rather than the date the decision was taken.
+60% to 90% of their trades therefore "violate" the alignment invariant
+with leads up to 538 days, and the violation is meaningless: the field
+does not hold what the check needs.
+
+Nothing published rests on these arms and none of them is worth
+re-running. The reason to record it is that a future audit sweeping all
+237 arms will find them and have to work this out again.
