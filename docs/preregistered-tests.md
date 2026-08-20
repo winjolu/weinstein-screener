@@ -3910,3 +3910,87 @@ consumed, so nothing failed loudly when the cache went away — the figures
 simply became unverifiable, and stayed quotable. Recording a cache
 identity and a row count against each arm would have caught this the
 first time an arm was re-read.
+
+---
+
+# PRE-REGISTRATION — B2: restate every published figure against IWM
+
+Written 2026-08-20, **before** the re-run it describes. Committed before
+any arm is executed, so what follows is a commitment rather than a
+description.
+
+## The change
+
+Every figure in this file measures the strategy against SPY. SPY tracks
+500 large companies. This screen surfaces small and mid-sized ones. The
+benchmark will be **IWM** (iShares Russell 2000) for all three windows.
+
+## Why IWM and not something else
+
+- **Not VTWO.** It is the cleaner Russell 2000 vehicle and I already
+  hold it, but its history begins 2010-09-22 and cannot reach the
+  2005-2009 window at all. A benchmark that changes instrument between
+  windows is worse than one that is slightly wrong in all of them.
+- **Not IJR or MDY.** Both are defensible size proxies and both are
+  recorded in B1 for comparison, but the Russell 2000 is the standard
+  small-cap benchmark and picking among three after seeing all three is
+  the thing this pre-registration exists to prevent.
+- IWM covers 2000-05-26 onward and its adjustment is sound:
+  `closeadj/close` runs 0.7131 to 1.0000 monotonically over 26 years,
+  about 1.3% a year of dividend accrual.
+
+## The uncomfortable part, stated up front
+
+**I already know which way this goes.** B1 measured the size spread at
++0.32, −1.40 and −6.85 points across the three windows, so the 2021
+window improves by 6.85 points and results currently filed as small
+losses against SPY will become wins.
+
+Changing a benchmark after seeing that the change flatters the result is
+indistinguishable from fitting, whatever the reasoning behind it. Three
+things are meant to hold that in check:
+
+1. The reasoning is Chan's and it is prior to the measurement: a
+   benchmark must match the securities traded. It would be the right
+   change if the spread ran the other way.
+2. The 2010 window moves against the strategy by 1.40 points and the
+   restatement will report that with the same prominence as 2021.
+3. This is written down before the run rather than after it.
+
+That is not proof of good faith and it is not meant to be. It is the
+audit trail that lets a later reader decide for themselves.
+
+## What gets reported
+
+Every table gets **three** columns, not a replaced one: absolute CAGR,
+SPY buy-and-hold, IWM buy-and-hold. Both edges are shown. The SPY column
+stays permanently — deleting it would erase the comparison this
+pre-registration is being judged against.
+
+Active t-statistics are recomputed against IWM and reported alongside
+the SPY ones. Nothing below |t| = 2 is a finding in either column, which
+is the standing rule and is not relaxed for a benchmark that flatters.
+
+## What would count as each outcome
+
+- **The strategy has a real edge:** an arm beats IWM at |t| ≥ 2 in more
+  than one window. Nothing has ever reached |t| = 2 against SPY, and I
+  do not expect a benchmark change to manufacture significance — the
+  spread shifts the mean without narrowing the spread.
+- **Nothing changes:** the edges move by the size spread, no t-statistic
+  clears 2, and the conclusion stands that this rule is indistinguishable
+  from noise. **This is what I expect.**
+- **Void:** if the re-run fails to reproduce the trade-level figures as
+  well as the portfolio-level ones, the problem is larger than a missing
+  cache and the restatement waits until that is understood.
+
+## The precondition
+
+This cannot run until the published arms reproduce. `w2_2021_R20`
+currently returns +10.38% absolute against a published +12.09%, because
+the bar cache those arms ran on was deleted. The re-run happens first,
+under a pinned cache whose identity is recorded per arm in
+`run_provenance`. If the re-run does not restore the published figures
+to within a tolerance stated in advance — **0.25 points of absolute
+CAGR** — then the published figures were never reproducible for some
+other reason and B2 does not proceed.
