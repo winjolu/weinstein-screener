@@ -243,6 +243,35 @@ CREATE TABLE IF NOT EXISTS backtest_trades (
 -- `fingerprint` is size and mtime rather than a hash of 350MB, which is
 -- enough to notice a cache was replaced without making every run pay to
 -- read the whole file.
+-- Every portfolio-level figure, with the configuration that produced it.
+--
+-- run_provenance records what data an arm consumed. This records what
+-- settings turned its trades into a yearly return, which is a separate
+-- and larger source of unreproducibility: the same 6,225 trades of
+-- w2_2021_R20 yield anywhere from +9.54% to +18.69% absolute CAGR
+-- depending only on capital, stake, cash yield, parking cost and
+-- risk-based sizing. Across three published arms the spread runs 8.4 to
+-- 10.9 points. The published +12.09% is a legitimate point inside that
+-- range and cannot be identified within it, because nothing recorded
+-- which point it was.
+--
+-- A figure without its configuration is not a result. `config` is the
+-- full keyword set as JSON so a later reader can re-run it exactly
+-- rather than search for it.
+CREATE TABLE IF NOT EXISTS portfolio_runs (
+    parameter_set TEXT NOT NULL,
+    computed_at TEXT NOT NULL,
+    config TEXT NOT NULL,
+    cagr_pct REAL,
+    benchmark TEXT,
+    benchmark_cagr_pct REAL,
+    max_drawdown_pct REAL,
+    trades INTEGER,
+    skipped INTEGER,
+    note TEXT,
+    PRIMARY KEY (parameter_set, computed_at)
+);
+
 CREATE TABLE IF NOT EXISTS run_provenance (
     parameter_set TEXT PRIMARY KEY,
     recorded_at TEXT NOT NULL,
@@ -1019,3 +1048,55 @@ def unreproducible_arms():
         else:
             out["ok"].append(arm)
     return out
+
+
+def record_portfolio_run(parameter_set, config, result, benchmark=None,
+                         benchmark_cagr_pct=None, note=None):
+    """Store a portfolio figure together with the settings that produced it.
+
+    The settings are the point. A yearly return computed from a fixed set
+    of trades still depends on capital, stake, cash yield, parking cost
+    and whether sizing is risk-based, and those move it by eight to
+    eleven points on the arms published here. Recording the number alone
+    produces a figure that reads as a measurement and behaves as an
+    opinion.
+    """
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO portfolio_runs (parameter_set, computed_at, "
+            "config, cagr_pct, benchmark, benchmark_cagr_pct, max_drawdown_pct, "
+            "trades, skipped, note) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (parameter_set,
+             datetime.datetime.now().isoformat(timespec="seconds"),
+             json.dumps(config, sort_keys=True, default=str),
+             result.get("cagr_pct"), benchmark, benchmark_cagr_pct,
+             result.get("worst_drawdown_pct"), result.get("taken"),
+             result.get("skipped"), note))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_portfolio_runs(parameter_set=None):
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        if parameter_set:
+            rows = conn.execute(
+                "SELECT * FROM portfolio_runs WHERE parameter_set = ? "
+                "ORDER BY computed_at DESC", (parameter_set,)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM portfolio_runs ORDER BY computed_at DESC").fetchall()
+        out = []
+        for row in rows:
+            entry = dict(row)
+            try:
+                entry["config"] = json.loads(entry["config"])
+            except (TypeError, ValueError):
+                pass
+            out.append(entry)
+        return out
+    finally:
+        conn.close()

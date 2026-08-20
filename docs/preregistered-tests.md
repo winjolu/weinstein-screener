@@ -3994,3 +3994,69 @@ under a pinned cache whose identity is recorded per arm in
 to within a tolerance stated in advance — **0.25 points of absolute
 CAGR** — then the published figures were never reproducible for some
 other reason and B2 does not proceed.
+
+## B2 addendum, same day — the precondition was based on a wrong diagnosis
+
+Appended rather than edited into the text above. A pre-registration that
+gets quietly revised once the facts arrive is worth nothing.
+
+**What I said:** the published portfolio figures do not reproduce
+because the bar cache was deleted, and no configuration sweep closes the
+gap "because the missing input is data rather than a parameter."
+
+**That was wrong**, and it was wrong because the sweep behind it was
+incomplete. It varied capital, stake and cash yield and left out
+`risk_pct`, `park_cost_pct` and `max_stake`. Including them puts the
+published +12.09% absolute squarely inside the reachable range.
+
+### The real problem is larger
+
+Holding the trades and the bars fixed and varying only the account
+settings, across 48 configurations each:
+
+| arm | published | range | spread |
+|---|---|---|---|
+| w2_2021_R20 | +12.09% | +9.54% .. +18.69% | 9.14pt |
+| w2_2010_R20 | +7.02% | +2.34% .. +10.72% | 8.38pt |
+| w2_2021_M9 | +4.35% | −5.05% .. +5.84% | 10.90pt |
+
+All absolute CAGR. The published figure lies inside the range in all
+three cases, so each is a legitimate point in the space and none is
+identifiable within it.
+
+**The missing cache was never the main problem.** Even with the original
+data intact, these figures could not have been reproduced, because the
+configuration that produced them was never written down and the figures
+move by eight to eleven points across plausible settings. The cache made
+a bad situation slightly worse.
+
+The closest match found by search is +12.51% at `risk_pct=0.75`,
+`park_cost_pct=0.25`, `max_stake=5000` — still outside the 0.25-point
+tolerance, and arrived at by fitting parameters to a remembered number,
+which is worth nothing as evidence. I stopped rather than continue
+searching.
+
+### What changes
+
+**The published portfolio-level figures are superseded rather than
+repaired.** They cannot be restored, only replaced by figures computed
+under a configuration that is recorded this time. Trade-level results —
+counts, per-trade returns, win rates, everything in the D4 and D5 tables
+— are unaffected and remain reproducible from the database.
+
+The B2 precondition as written cannot be met and is void. Replacing it:
+the re-run establishes a **new** baseline under a pinned, recorded
+configuration, and the old figures are marked superseded wherever they
+appear rather than being matched. B2's substance — three columns, both
+benchmarks, the SPY column kept permanently — stands unchanged.
+
+`portfolio_runs` now stores the full keyword set as JSON beside every
+figure. `run_provenance` records the data; this records the settings. It
+took both to lose a number, and it takes both to keep one.
+
+### The rule this produces
+
+A figure derived from a simulation carries two dependencies, not one:
+the data and the configuration. Recording the data alone reads as
+diligence and is half a measure. I recorded the data first, this
+morning, and would have called that job done.

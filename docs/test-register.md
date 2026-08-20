@@ -137,9 +137,14 @@ not yet run · **defect** revealed a bug rather than a result
 - A level is not a ratio. Returns divide a scale error out; dollar
   volume, market cap and any other product of price and quantity do not.
   Check those separately after any finding about price integrity.
-- An arm that cannot be recomputed is a claim, not a result. Record what
-  data a run consumed, not just its parameters. A cache vanished and the
-  W2/W3 figures became unverifiable without anything failing.
+- An arm that cannot be recomputed is a claim, not a result. A simulated
+  figure depends on the data *and* the configuration, and recording only
+  the data is half a measure. The same trades yield +9.54% to +18.69%
+  absolute CAGR on account settings alone.
+- Finish the sweep before naming the cause. I diagnosed the W2 figures
+  as unreproducible for want of data, on a sweep that had left out three
+  parameters. The published number was inside the reachable range all
+  along, and the true cause — an unrecorded configuration — was worse.
 - Write down why a defect did *no* damage. D4's floor survived because
   penny-stock prices inflate into the thousands rather than the
   millions, which is luck rather than design — and unrecorded luck gets

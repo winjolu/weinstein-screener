@@ -112,5 +112,62 @@ class ProvenanceTest(unittest.TestCase):
         self.assertIn("arm1", db.unreproducible_arms()["ok"])
 
 
+
+class PortfolioRunTest(unittest.TestCase):
+    """A yearly return without its configuration is an opinion.
+
+    The same 6,225 trades of w2_2021_R20 produce +9.54% to +18.69%
+    absolute CAGR depending only on account settings. Recording the
+    number without the settings is how +12.09% became unidentifiable.
+    """
+
+    def setUp(self):
+        handle, self.path = tempfile.mkstemp(suffix=".db")
+        os.close(handle)
+        os.unlink(self.path)
+        self._previous = db.DB_PATH
+        db.DB_PATH = self.path
+        db.init_db()
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        db.DB_PATH = self._previous
+        if os.path.exists(self.path):
+            os.unlink(self.path)
+
+    def test_records_config_alongside_the_figure(self):
+        db.record_portfolio_run(
+            "arm1", {"capital": 100000.0, "stake": 1000.0, "risk_pct": None},
+            {"cagr_pct": 12.09, "skipped": 3832, "taken": 2393},
+            benchmark="IWM", benchmark_cagr_pct=6.13)
+        rows = db.get_portfolio_runs("arm1")
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows[0]["cagr_pct"], 12.09)
+        self.assertEqual(rows[0]["benchmark"], "IWM")
+        self.assertEqual(rows[0]["config"]["capital"], 100000.0)
+
+    def test_config_round_trips_as_a_dict_not_a_string(self):
+        db.record_portfolio_run("arm1", {"risk_pct": 0.75}, {"cagr_pct": 1.0})
+        self.assertIsInstance(db.get_portfolio_runs("arm1")[0]["config"], dict)
+
+    def test_a_none_in_the_config_survives(self):
+        """risk_pct=None and risk_pct absent are different runs, and the
+        difference is worth several points."""
+        db.record_portfolio_run("arm1", {"risk_pct": None}, {"cagr_pct": 1.0})
+        config = db.get_portfolio_runs("arm1")[0]["config"]
+        self.assertIn("risk_pct", config)
+        self.assertIsNone(config["risk_pct"])
+
+    def test_two_configs_for_one_arm_are_both_kept(self):
+        """Re-running under different settings is a second result, not a
+        correction of the first."""
+        import time
+        db.record_portfolio_run("arm1", {"risk_pct": None}, {"cagr_pct": 9.54})
+        time.sleep(1.01)
+        db.record_portfolio_run("arm1", {"risk_pct": 0.75}, {"cagr_pct": 18.69})
+        rows = db.get_portfolio_runs("arm1")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({r["cagr_pct"] for r in rows}, {9.54, 18.69})
+
 if __name__ == "__main__":
     unittest.main()
