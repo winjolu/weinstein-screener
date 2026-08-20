@@ -4144,3 +4144,121 @@ incoherent" in my own working notes, and ran the simulation anyway
 because the trades and the bars were both to hand. What caught it was
 not the reasoning — it was a drawdown that could not coexist with its
 own return.
+
+## B2 scoping — the two pre-checks, and three more defects
+
+Both checks passed, and getting to them found three further reasons the
+re-run would have failed.
+
+### Check 1: the universe rule reproduces
+
+The point-in-time universes were never saved — `universe_snapshot` holds
+only `wide` and `holdout`, neither of which is one. So the rule has to
+be re-derived: domestic common stock, real exchange (NYSE, NASDAQ,
+NYSEMKT, NYSEARCA, BATS), listed at the window start, usable bars.
+
+Tested by containment, which is the only test available without the
+original list: **every ticker that produced a trade must appear in the
+reconstruction.**
+
+| window | reconstruction | traded | traded but not reconstructed |
+|---|---|---|---|
+| 2005 | 5,678 | 4,304 | **0** |
+| 2010 | 4,950 | 3,991 | **0** |
+| 2021 | 4,564 | 4,163 | **0** |
+
+The liquidity leg reproduces too, at over 99.8%:
+
+| window | base | liquid | traded | missed |
+|---|---|---|---|---|
+| 2010 W3 | 4,950 | 3,366 | 2,227 | 1 (0.0%) |
+| 2021 W3 | 4,564 | 4,106 | 2,805 | 6 (0.2%) |
+
+Containment does not prove the reconstruction is *identical* to the
+original — it could be a superset, which would produce more trades than
+before. It proves the rule loses nothing, which is the half that can be
+checked.
+
+### The seven misses refine D4 rather than contradicting it
+
+Every one is a name the quantisation-safe rule now declines to measure:
+
+| ticker | bars floored | naive score | measurable score |
+|---|---|---|---|
+| WHLR | 64/64 (100%) | **$26,043,557,919/wk** | $0 |
+| HSDT | 64/64 (100%) | $0 | $0 |
+| WINT | 62/64 (96.9%) | $501,522 | $1,626,824 |
+| APVO | 58/64 (90.6%) | $149,564,868 | $1,595,358,588 |
+| CNSP | 62/64 (96.9%) | $9,886,076 | $316,354,429 |
+| HIND | 59/64 (92.2%) | $43,989,419 | $563,064,563 |
+
+WHLR is the clean case: **every one of its bars is on the volume floor,
+the naive computation scores it at $26bn a week, and it was traded in
+`w3_2021`.** So the defect did admit names to the liquid universe — six
+in 2021 and one in 2010.
+
+D4 concluded the floor "was never contaminated". That is right about the
+*conclusion* — seven names out of thousands moved nothing — and wrong as
+stated. The accurate form: the defect admitted a handful of names, too
+few to move any published figure, and the corrected rule excludes them.
+
+The three with enormous measurable scores show the floor at
+`volume <= 1` is too narrow. A bar carrying volume 2 or 3 against a true
+value near zero is quantised as well, just not to the floor, so the
+surviving bars can still be wrong. `MAX_QUANTISED` catches these by a
+different route — a series that is 90% floored is rejected whatever the
+remaining bars say — but the two conditions are doing one job between
+them rather than one each.
+
+### Check 2: the build script could not have worked
+
+Three separate faults, none of which would have surfaced until a rebuild
+was attempted, and each of which would have wasted the whole run:
+
+1. **It wrote to a path nothing reads.** Output went to
+   `~/market-data/build/weekly_sharadar.pkl`; the screener reads
+   `~/Library/Application Support/weinstein-screener/weekly_bars.pkl`.
+   Nothing connected them but a hand-made symlink in a third directory
+   pointing into `/tmp`. **This is the root cause of the vintage
+   mismatch** — when `/tmp` was cleaned the link broke, the screener
+   carried on reading an older file, and nothing said so.
+2. **The output directory did not exist.** `~/market-data/build` is
+   absent, and the write is the last statement in the script, so the
+   universe query, the resample and the entire in-memory cache would be
+   lost to a `FileNotFoundError` after about five minutes.
+3. **The output format was wrong.** It pickled a bare `{symbol: bars}`
+   dict; `bar_cache.load()` reads `payload["bars"]` and would raise
+   `KeyError`.
+
+All three fixed. The destination now resolves through
+`market_core.paths` to exactly what `bar_cache` reads, writability is
+probed at startup rather than discovered at the end, and the payload
+carries the wrapper.
+
+Two paths with no enforced relationship is the defect. The missing
+directory was only how it surfaced.
+
+### Cost, measured
+
+Engine rate 1,610 evaluations/second, verified linear from 40 to 300
+tickers (0.167 to 0.170 s/ticker). The trend rule costs 1.30x the
+checklist while producing 6.4x the trades.
+
+| component | serial |
+|---|---|
+| weekly cache rebuild | 5 min |
+| daily cache rebuild, 2004-2011 only | 15 min |
+| 21 weekly arms | 368 min |
+| 5 daily arms | 67 min |
+| portfolio layer | 0.3 min |
+| **total** | **7.6 hours** |
+
+**About 1.2 hours with eight arms in parallel**, bounded below by
+`w2_2010_M9` at 39 minutes. More than eightfold parallelism buys
+nothing.
+
+Two constraints worth recording. The disk is 95% full — 48GB free — which
+is why the daily build is scoped to the window T3 needs rather than the
+full history, which would be about 6.6GB. And the weekly rebuild now
+overwrites the live cache in place; it is already the wrong vintage, so
+nothing is lost, but it should be copied aside first.
