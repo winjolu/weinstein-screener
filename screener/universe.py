@@ -18,6 +18,8 @@ import re
 
 from webull.data.common.category import Category
 
+from market_core import liquidity
+
 from . import data_fetch, db, rate_limit
 
 # `ABR PRD`, `JPM PRC`, `NLY PRF` — the exchange's own preferred-share
@@ -304,23 +306,35 @@ def filter_by_liquidity(bars_by_symbol, min_dollar_volume=MIN_AVG_WEEKLY_DOLLAR_
     the last 12 complete weeks and reported as a distribution, because I'd
     rather set this threshold from what the data actually looks like than
     from a number I made up.
+
+    The measurement itself lives in `market_core.liquidity`, because
+    close-times-volume stops being meaningful once a reverse split has
+    driven adjusted volume below one share and it rounds up to the
+    storage floor. That defect is a property of the vendor's data rather
+    than of this screen, and it is large: 6% of the archive's price bars
+    sit on that floor. Names it makes unmeasurable are dropped and
+    counted separately, so a data fault never gets reported as a
+    judgement about tradability.
     """
-    scored = {}
-    for symbol, bars in bars_by_symbol.items():
-        recent = bars[-12:]
-        if not recent:
-            continue
-        scored[symbol] = sum(b["close"] * b["volume"] for b in recent) / len(recent)
+    keep, rejected = liquidity.filter_by_dollar_volume(
+        bars_by_symbol, min_dollar_volume, window=12)
 
-    keep = {s: bars_by_symbol[s] for s, dv in scored.items() if dv >= min_dollar_volume}
-
-    if report and scored:
-        ordered = sorted(scored.values())
-        def pct(p):
-            return ordered[min(int(len(ordered) * p), len(ordered) - 1)]
-        print(
-            f"liquidity: median ${pct(0.5)/1e6:.1f}M/wk  "
-            f"p25 ${pct(0.25)/1e6:.1f}M  p75 ${pct(0.75)/1e6:.1f}M  "
-            f"-> {len(keep)}/{len(scored)} above ${min_dollar_volume/1e6:.0f}M"
-        )
+    if report:
+        scored = {}
+        for symbol, bars in bars_by_symbol.items():
+            measured = liquidity.dollar_volume(bars[-12:])
+            if measured is not None:
+                scored[symbol] = measured
+        if scored:
+            ordered = sorted(scored.values())
+            def pct(p):
+                return ordered[min(int(len(ordered) * p), len(ordered) - 1)]
+            print(
+                f"liquidity: median ${pct(0.5)/1e6:.1f}M/wk  "
+                f"p25 ${pct(0.25)/1e6:.1f}M  p75 ${pct(0.75)/1e6:.1f}M  "
+                f"-> {len(keep)}/{len(scored)} above ${min_dollar_volume/1e6:.0f}M"
+            )
+        if rejected["unmeasurable"]:
+            print(f"liquidity: {len(rejected['unmeasurable'])} names dropped as "
+                  f"unmeasurable — adjusted volume on the storage floor")
     return keep
