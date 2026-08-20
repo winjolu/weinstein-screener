@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from screener import backtest, backtest_report, db, sector_scan
+from screener import backtest, backtest_report, bar_cache, db, sector_scan
 
 # Named parameter sets worth comparing against baseline — see
 # backtest.py's _condition_overrides for how these get applied.
@@ -75,6 +75,12 @@ def main():
             **overrides,
         )
         print(f"{name}: {len(trades)} trades recorded.")
+
+        # What the arm consumed, not just what it was told to do. The W2
+        # and W3 figures stopped reproducing because their bar cache was
+        # a symlink into a scratch directory that got cleaned, and
+        # nothing anywhere recorded which file an arm had run against.
+        db.record_provenance(name, bar_cache_path=bar_cache.CACHE_PATH)
 
     print()
     backtest_report.summarize()

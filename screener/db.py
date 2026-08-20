@@ -227,6 +227,31 @@ CREATE TABLE IF NOT EXISTS backtest_trades (
     parameter_set TEXT,
     still_open BOOLEAN
 );
+
+-- What data each arm was actually computed against.
+--
+-- `parameter_set` records what the run was configured to do and nothing
+-- about what it consumed, which is how the W2 and W3 portfolio figures
+-- became unreproducible without anything failing: the bar cache they ran
+-- on was a symlink into a scratch directory, the directory was cleaned,
+-- and the published numbers stayed quotable while quietly ceasing to be
+-- checkable. The same trades now return +10.38% where +12.09% is
+-- published, and no configuration sweep closes the gap because the
+-- missing input is data rather than a parameter.
+--
+-- An arm that cannot be recomputed is a claim rather than a result.
+-- `fingerprint` is size and mtime rather than a hash of 350MB, which is
+-- enough to notice a cache was replaced without making every run pay to
+-- read the whole file.
+CREATE TABLE IF NOT EXISTS run_provenance (
+    parameter_set TEXT PRIMARY KEY,
+    recorded_at TEXT NOT NULL,
+    bar_cache_path TEXT,
+    bar_cache_fingerprint TEXT,
+    bar_cache_symbols INTEGER,
+    trade_count INTEGER,
+    note TEXT
+);
 """
 
 RESULT_COLUMNS = [
@@ -889,3 +914,108 @@ def get_indicator_readings(indicator=None):
         return [dict(r) for r in rows]
     finally:
         conn.close()
+
+
+def fingerprint_file(path):
+    """Size and mtime of a file, or None when it is not there.
+
+    Deliberately not a content hash. The bar cache is 350MB and every run
+    would pay to read it, which is how a check gets removed later for
+    being slow. Size plus mtime notices a cache that was rebuilt or
+    swapped, which is the failure that actually happened.
+
+    A dangling symlink returns None rather than raising, because that is
+    exactly the state worth recording: the path was configured, and there
+    was nothing behind it.
+    """
+    import os
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return f"{stat.st_size}:{int(stat.st_mtime)}"
+
+
+def record_provenance(parameter_set, bar_cache_path=None, bar_cache_symbols=None,
+                      note=None):
+    """Record what data an arm was computed against.
+
+    Called once per arm, after its trades are written. Overwrites on
+    re-run, because the current provenance of an arm is the one that
+    produced the rows now in the table.
+    """
+    conn = _connect()
+    try:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM backtest_trades WHERE parameter_set = ?",
+            (parameter_set,)).fetchone()[0]
+        conn.execute(
+            "INSERT OR REPLACE INTO run_provenance "
+            "(parameter_set, recorded_at, bar_cache_path, bar_cache_fingerprint, "
+            " bar_cache_symbols, trade_count, note) VALUES (?,?,?,?,?,?,?)",
+            (parameter_set, datetime.datetime.now().isoformat(timespec="seconds"),
+             bar_cache_path, fingerprint_file(bar_cache_path) if bar_cache_path else None,
+             bar_cache_symbols, count, note))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_provenance(parameter_set=None):
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        if parameter_set:
+            row = conn.execute(
+                "SELECT * FROM run_provenance WHERE parameter_set = ?",
+                (parameter_set,)).fetchone()
+            return dict(row) if row else None
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM run_provenance ORDER BY recorded_at DESC")]
+    finally:
+        conn.close()
+
+
+def unreproducible_arms():
+    """Arms whose recorded bar cache no longer matches what is on disk.
+
+    Three ways an arm lands here, and the distinction matters when
+    deciding whether a published figure can still be quoted:
+
+    - `no_provenance` — the arm predates this table. Says nothing about
+      whether it reproduces, only that nothing was recorded. Every arm
+      run before 2026-08-19 is in this state.
+    - `cache_missing` — the recorded path is gone. The figures cannot be
+      regenerated at all.
+    - `cache_changed` — the path exists but the file behind it is not the
+      one the arm ran on.
+    """
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        recorded = {r["parameter_set"]: dict(r) for r in
+                    conn.execute("SELECT * FROM run_provenance")}
+        arms = [r[0] for r in conn.execute(
+            "SELECT DISTINCT parameter_set FROM backtest_trades "
+            "WHERE parameter_set IS NOT NULL")]
+    finally:
+        conn.close()
+
+    out = {"no_provenance": [], "cache_missing": [], "cache_changed": [], "ok": []}
+    for arm in sorted(arms):
+        row = recorded.get(arm)
+        if not row:
+            out["no_provenance"].append(arm)
+            continue
+        path = row.get("bar_cache_path")
+        if not path:
+            out["no_provenance"].append(arm)
+            continue
+        current = fingerprint_file(path)
+        if current is None:
+            out["cache_missing"].append(arm)
+        elif row.get("bar_cache_fingerprint") and current != row["bar_cache_fingerprint"]:
+            out["cache_changed"].append(arm)
+        else:
+            out["ok"].append(arm)
+    return out
