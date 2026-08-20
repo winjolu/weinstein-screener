@@ -4060,3 +4060,87 @@ A figure derived from a simulation carries two dependencies, not one:
 the data and the configuration. Recording the data alone reads as
 diligence and is half a measure. I recorded the data first, this
 morning, and would have called that job done.
+
+## B2 second addendum — the re-run was attempted and its output discarded
+
+Ran the 26 published arms under the pinned configuration
+(`capital=100,000`, `stake=1,000`, `cash_yield=3%`, parked in SPY at
+0.11% a leg, no risk-based sizing). The table it produced is not
+recorded here, because it is wrong.
+
+**Two arms reported an absolute CAGR of +5.03% and +10.39% beside
+maximum absolute drawdowns of −98.3% and −98.4%.** An account cannot
+lose 98% of itself and still compound upward. Chasing that:
+`w2_2005_R20`'s equity curve starts at $28,242 on $100,000 of capital,
+peaks at $1,739,781 and ends at $136,747.
+
+### The cause
+
+Stored trade prices and the current bar cache are in **different
+split-adjustment vintages**. The trades were written against the cache
+that has since been deleted. Every corporate action since rewrote the
+history behind it, so the same ticker on the same day carries two
+different prices.
+
+| arm | disagreeing | of checkable | uncovered | worst |
+|---|---|---|---|---|
+| w2_2005_R20 | 546 | 1,919 (28.5%) | 3,751 | 2,000x |
+| w2_2010_R20 | 690 | 3,593 (19.2%) | 4,292 | 50,000x |
+| w2_2021_R20 | 232 | 4,949 (4.7%) | 1,276 | 5,319x |
+| w3_2021_R20 | 143 | 2,989 (4.8%) | 679 | 15x |
+| t3_d020 | 8,303 | 27,102 (30.6%) | 104 | non-finite |
+
+A simulation computes share counts from the stored price and marks them
+at the cached one, so a 1,680x disagreement becomes a 1,680x position.
+`uncovered` is the larger hole in the older windows: 3,751 of 5,670
+trades in the 2005 arm have no bars in the current cache at all.
+
+### What this means for the earlier diagnosis
+
+This is the third reading of the same problem and it supersedes both
+earlier ones.
+
+1. First: the figures do not reproduce because the cache was deleted.
+2. Then: the cache was not the cause, the unrecorded configuration was.
+3. Now: **both are true and neither is sufficient.** The binding
+   constraint is that recomputation needs bars in the stored prices'
+   vintage, and no such cache exists. The configuration sensitivity is
+   real on top of that.
+
+The configuration finding survives on vintage-clean trades — spreads of
+5.83, 4.27 and 6.06 points on three arms — so settings do move a figure
+by four to six points. I had reported 8 to 11; the contaminated curves
+inflated it and the corrected figure is the smaller one.
+
+### Why the agreeing subset cannot be used
+
+Restricting to trades whose price matches drops 28.8% of the 2005 window
+and produces a clean-looking table. It is not usable: a trade disagrees
+*because* its ticker had a corporate action, and reverse splits
+concentrate in failing companies. The subset is survivorship-biased,
+which is the exact defect W2 was built to remove.
+
+### Conclusion
+
+**The published portfolio-level figures cannot be recomputed from stored
+trades at all.** Restoring them needs the full path: rebuild the
+point-in-time universes, regenerate trades against a pinned cache, then
+compute portfolio figures — with the cache and configuration recorded.
+That is the expensive job the cheap re-run appeared to avoid.
+
+Trade-level results are unaffected throughout. D4, D5 and B1 read entry
+dates, returns and archive bars directly and never mix vintages.
+
+`market_core.vintage` now refuses the mixed computation rather than
+producing a number from it, and `simulate_fixed_capital` calls it by
+default. The 26 rows written to `portfolio_runs` during this attempt
+were deleted.
+
+### The rule
+
+A guard that runs after the number exists is a guard that has already
+failed. I noticed the vintage risk, wrote "mixing vintages would be
+incoherent" in my own working notes, and ran the simulation anyway
+because the trades and the bars were both to hand. What caught it was
+not the reasoning — it was a drawdown that could not coexist with its
+own return.

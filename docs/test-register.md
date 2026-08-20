@@ -141,6 +141,12 @@ not yet run · **defect** revealed a bug rather than a result
   figure depends on the data *and* the configuration, and recording only
   the data is half a measure. The same trades yield +9.54% to +18.69%
   absolute CAGR on account settings alone.
+- Two numbers that cannot both be true beat any amount of reasoning.
+  +5.03% a year beside a 98.3% drawdown is what exposed the vintage
+  mismatch, after the risk had been noticed in writing and set aside.
+- Clear the bytecode between mutation runs. A stale .pyc made one
+  mutation read as uncaught and one working guard read as broken, in the
+  same hour.
 - Finish the sweep before naming the cause. I diagnosed the W2 figures
   as unreproducible for want of data, on a sweep that had left out three
   parameters. The published number was inside the reachable range all

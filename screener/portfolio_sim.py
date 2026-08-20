@@ -24,6 +24,8 @@ import bisect
 import datetime
 import statistics
 
+from market_core import vintage
+
 
 def _date(value):
     return datetime.date.fromisoformat(value[:10])
@@ -440,7 +442,7 @@ def _stake_for(trade, capital, base_stake, risk_pct, max_stake):
 def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
                             cash_yield_pct=0.0, priority=None, bars_by_symbol=None,
                             park_in=None, park_when=None, park_cost_pct=0.11,
-                            risk_pct=None, max_stake=None):
+                            risk_pct=None, max_stake=None, verify_vintage=True):
     """What a real account with a fixed amount of money would have done.
 
     simulate_account() takes every signal and reports the answer against
@@ -473,6 +475,14 @@ def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
     to change a conclusion. Left off by default so it is always an
     explicit choice rather than a quiet assist.
 
+    `verify_vintage` refuses to run when the stored trade prices and the
+    supplied bars come from different split-adjustment vintages. Share
+    counts computed from one and marked at the other produce an account
+    that starts at $28,242 on $100,000 of capital, peaks at $1.7M and
+    reports +5.03% a year beside a 98.3% drawdown. Nothing about either
+    input looks wrong on its own, which is why this is checked here
+    rather than left to whoever reads the output.
+
     :return: dict including `skipped`, which is the figure to watch. A
         high skip rate means the reported return belongs to a different
         and much more selective strategy than the one that was tested.
@@ -490,6 +500,9 @@ def simulate_fixed_capital(trades, capital=25000.0, stake=1000.0, seed=None,
     done = _resolved(trades)
     if not done:
         return None
+
+    if verify_vintage and bars_by_symbol:
+        vintage.check(done, bars_by_symbol)
 
     by_entry = sorted(done, key=lambda t: (_date(t["entry_date"]), t["ticker"]))
     if priority is not None:
