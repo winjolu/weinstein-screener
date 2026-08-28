@@ -4360,3 +4360,72 @@ its universe size, its rule and its full account configuration. Ten of
 ten come back `ok` from `unreproducible_arms()`, against 237 older arms
 that come back `no_provenance`. Whatever else this run produced, that is
 the part that stops it happening again.
+
+---
+
+## C4 — the Deflated Sharpe Ratio (Chan queue item 4)
+
+Registered and run 2026-08-20 against the ten re-run arms, using
+`market_core.performance`. The question Bailey and Lopez de Prado (2014)
+pose is the one this project has been circling from other directions:
+**a Sharpe selected as the best of many is biased upward by the
+selection, and nothing about the number says so.**
+
+Weekly Sharpe from each arm's equity curve, pinned configuration:
+
+| arm | weekly | annualised |
+|---|---|---|
+| w2_2010_M9 | +0.1061 | **+0.765** |
+| w3_2010_R20 | +0.1038 | +0.749 |
+| w3_2010_M9 | +0.0988 | +0.712 |
+| w2_2010_R20 | +0.0681 | +0.491 |
+| w2_2021_R20 | +0.0574 | +0.414 |
+| w2_2021_M9 | +0.0325 | +0.234 |
+| w2_2005_R20 | +0.0315 | +0.227 |
+| w3_2021_M9 | +0.0385 | +0.277 |
+| w3_2021_R20 | +0.0257 | +0.186 |
+| w2_2005_M9 | +0.0031 | +0.022 |
+
+Variance of Sharpe across the ten: 0.001329.
+
+### The result
+
+| measure | value |
+|---|---|
+| Probabilistic Sharpe, best arm vs zero | **0.9977** |
+| Deflated over 10 trials | 0.9037 |
+| **Deflated over 237 trials** | **0.5352** |
+
+The best arm's Sharpe is 99.77% likely to exceed zero taken on its own.
+Priced for the 237 arms actually run to find it, that falls to 53.5% — a
+coin flip. The bar it has to clear rises from zero to **+0.1028 weekly
+(+0.74 annualised)**, and the arm scores +0.1061.
+
+**It clears the bar by 0.0033 weekly.** That is the entire measured edge
+of this project's best configuration, once the search is priced in.
+
+This is the fifth independent route to the same conclusion, and the
+first that quantifies the cost of the search itself rather than testing
+one arm at a time. The others could each be dismissed as a benchmark
+choice or a universe definition. This one prices the 237 looks.
+
+### Minimum track record
+
+**226 weeks — 4.3 years** of the best arm's returns before its Sharpe
+would be distinguishable from zero at 95% confidence. That figure
+applies to the forward log as well as to history, which converts "keep
+paper trading and see" into a defined wait with an end date.
+
+### Caveats, stated rather than buried
+
+- The Sharpe variance is measured across **10** arms, not 237. It is the
+  best estimate available and it is noisy; a wider spread among the
+  unmeasured arms would deflate further, not less.
+- The 237 count treats every arm as an independent trial. They are not —
+  many are variants of one another — so the true effective trial count
+  is somewhere below 237 and the deflation above is an upper bound on
+  the penalty. The 10-trial row is included for that reason: even at a
+  deliberately generous count the figure is 0.90, not 0.998.
+- Weekly returns are serially correlated in a trend strategy, so the
+  annualised figures carry the usual square-root-of-time optimism.
+  Reported alongside the weekly values rather than instead of them.

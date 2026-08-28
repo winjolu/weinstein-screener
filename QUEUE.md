@@ -32,18 +32,19 @@ market_core; only chapter 7's strategy content would be a new project.
    cannot reach the 2005 window. Restating the edge column is blocked
    on the re-run below.
 2. **Demote CAGR; report Sharpe, maximum absolute drawdown and MAR.**
+   `market_core.performance` now provides all three; what remains is
+   changing the report templates to lead with them.
    His objection is the one that produced two figures here rather than
    one: the CAGR denominator is ambiguous, which is why peak capital and
    average capital both had to be reported. MAR is CAGR over maximum
    absolute drawdown and largely survives leverage.
-3. **Minimum backtest length, from Bailey.** To be 95% confident a true
-   Sharpe exceeds zero needs a backtest Sharpe of 1 over 681 points
-   (~2.7 years daily); a backtest Sharpe of 2 needs only 174. It applies
-   to paper trading too, which turns the forward log from an open-ended
-   wait into a defined one.
-4. **Deflated Sharpe Ratio (Bailey 2014).** Discounts a Sharpe by how
-   many variants were tried to obtain it. This project has run 200+
-   arms. The paper is already in reference/papers/.
+3. ~~**Minimum backtest length, from Bailey.**~~ Done 2026-08-20 with C4.
+   `minimum_track_record_length` returns **226 weeks (4.3 years)** for
+   the best arm — the defined wait the forward log needed.
+4. ~~**Deflated Sharpe Ratio (Bailey 2014).**~~ Done 2026-08-20 as C4.
+   The best arm's probabilistic Sharpe of 0.998 falls to **0.535** once
+   deflated over 237 trials. Implemented in `market_core.performance`
+   alongside minimum track record length, which answers item 3.
 5. ~~**Return-window alignment check.**~~ Done 2026-08-19 as D5.
    `market_core.alignment` asserts it; every published arm is clean at
    0 violations, against 0.030% across the modern arms overall.

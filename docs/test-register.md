@@ -20,6 +20,7 @@ convention as it actually emerged.
 | **S** | **Overloaded, and a known defect.** S1-S2 are *data source* tests. S7 is the *short* side. Rename S7 to SH1 when next touched. |
 | **D** | **Data integrity** — ticker identity, delisting census, survivorship bounding. |
 | **B** | **Benchmark** — what the strategy is measured against. |
+| **C** | **Chan** — methodology adopted from the Chan text: selection bias, minimum track record, stationarity. |
 | **K** | **K-nearest neighbour** — the single machine-learning test. |
 
 ## Status legend
@@ -116,6 +117,12 @@ not yet run · **defect** revealed a bug rather than a result
 |---|---|---|
 | B1 | is the SPY benchmark the wrong index, and by how much | **closed** — size spread measured (IWM−SPY: +0.32, −1.40, **−6.85** points by window) |
 | B2 | restate every published arm against a size-matched benchmark | **closed** — 10 arms re-run on a rebuilt cache under one pinned, recorded configuration. Edges move by the size spread; **no arm reaches \|t\| = 2** against either index. Outcome as pre-registered |
+
+## C — from the Chan text
+
+| id | question | outcome |
+|---|---|---|
+| C4 | does the best arm survive being discounted by the size of the search | **closed** — probabilistic Sharpe 0.998 falls to **0.535** deflated over 237 trials. The best configuration clears the selection-adjusted bar by 0.0033 weekly |
 
 ## K — machine learning
 

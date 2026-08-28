@@ -1,7 +1,22 @@
 webull-openapi-python-sdk
 python-dotenv
 
-# Shared data layer and archival guards. Editable install from a local
-# checkout so both screener projects run the same code:
-#   pip install -e ~/market-data/market-core
--e ~/market-data/market-core
+# Scientific stack. The strategy engine is deliberately dependency-light,
+# but the statistical work is not something to hand-roll: Newey-West
+# standard errors for overlapping return windows, ADF and Engle-Granger
+# for the mean-reversion research, and the Bailey and Lopez de Prado
+# results for discounting a Sharpe by the size of the search behind it.
+numpy
+pandas
+scipy
+statsmodels
+scikit-learn
+matplotlib
+seaborn
+
+# Shared data layer and archival guards, installed separately because pip
+# does not expand "~" in a requirements file and the checkout lives outside
+# this repository. Both screener projects install the same checkout so they
+# cannot drift apart:
+#
+#   pip install -e "$HOME/market-data/market-core"
