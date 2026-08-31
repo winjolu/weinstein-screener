@@ -272,6 +272,39 @@ CREATE TABLE IF NOT EXISTS portfolio_runs (
     PRIMARY KEY (parameter_set, computed_at)
 );
 
+-- What the brokerage account actually held, timestamped.
+--
+-- The recommendation log records what was *suggested*, by hand, before
+-- an outcome was known. It cannot record what was *done*, and when it
+-- was used for that it drifted: a cost basis belonging to a different
+-- ticker, a stop $40 out of date, and a position that had been stopped
+-- out with no exit recorded. Three wrong answers came out of it in one
+-- session.
+--
+-- Snapshots accumulate rather than overwrite, so "what did I hold in
+-- August" stays answerable. Same reasoning as run_provenance: a state
+-- nobody wrote down is a state nobody can check.
+CREATE TABLE IF NOT EXISTS broker_positions (
+    taken_at TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    quantity REAL,
+    cost_basis REAL,
+    last_price REAL,
+    PRIMARY KEY (taken_at, ticker)
+);
+
+CREATE TABLE IF NOT EXISTS broker_orders (
+    taken_at TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    side TEXT,
+    order_type TEXT,
+    stop_price REAL,
+    limit_price REAL,
+    quantity REAL,
+    time_in_force TEXT,
+    status TEXT
+);
+
 CREATE TABLE IF NOT EXISTS run_provenance (
     parameter_set TEXT PRIMARY KEY,
     recorded_at TEXT NOT NULL,
@@ -1098,5 +1131,53 @@ def get_portfolio_runs(parameter_set=None):
                 pass
             out.append(entry)
         return out
+    finally:
+        conn.close()
+
+
+def save_broker_snapshot(snapshot):
+    """Store one timestamped read of the brokerage account."""
+    conn = _connect()
+    try:
+        taken = snapshot["taken_at"]
+        for p in snapshot.get("positions", []):
+            conn.execute(
+                "INSERT OR REPLACE INTO broker_positions "
+                "(taken_at, ticker, quantity, cost_basis, last_price) "
+                "VALUES (?,?,?,?,?)",
+                (taken, p["ticker"], p.get("quantity"),
+                 p.get("cost_basis"), p.get("last_price")))
+        for o in snapshot.get("orders", []):
+            conn.execute(
+                "INSERT INTO broker_orders (taken_at, ticker, side, order_type, "
+                "stop_price, limit_price, quantity, time_in_force, status) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (taken, o["ticker"], o.get("side"), o.get("order_type"),
+                 o.get("stop_price"), o.get("limit_price"), o.get("quantity"),
+                 o.get("time_in_force"), o.get("status")))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def latest_broker_snapshot():
+    """The most recent account read, or None if the account never synced."""
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT MAX(taken_at) FROM broker_positions").fetchone()
+        if not row or not row[0]:
+            return None
+        taken = row[0]
+        return {
+            "taken_at": taken,
+            "positions": [dict(r) for r in conn.execute(
+                "SELECT * FROM broker_positions WHERE taken_at=? ORDER BY ticker",
+                (taken,))],
+            "orders": [dict(r) for r in conn.execute(
+                "SELECT * FROM broker_orders WHERE taken_at=? ORDER BY ticker",
+                (taken,))],
+        }
     finally:
         conn.close()
