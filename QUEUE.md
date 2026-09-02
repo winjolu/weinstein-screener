@@ -60,6 +60,44 @@ market_core; only chapter 7's strategy content would be a new project.
    cointegration and pairs, on the same engine. Genuinely different
    content rather than another momentum variant.
 
+## Event contracts — queued 2026-09-01
+
+W1. **Kalshi's own API for historical event data.** Webull's API exposes
+   settled *events* but purges the *instruments*: 112 of 113 settled
+   KXHIGHNY events return zero strikes, direct symbol lookup returns
+   empty, and bars on a constructed past symbol give UNSUPPORTED_SYMBOL.
+   Only three dates exist at any time. Kalshi is the venue of record —
+   these are KX-prefixed Kalshi contracts that Webull routes — and its
+   public API documents settled-market history and candlesticks.
+   **Build the archive to the same standard as sharadar.db**: append-only,
+   frozen watermarks via `market_core.sharadar.assert_writable`, read-only
+   opens everywhere but the refresh, one writer. Event contract history is
+   *more* perishable than equity history — Webull already proves it gets
+   deleted — so capture is urgent in a way the equity archive never was.
+
+W2. **Record forward, starting now.** Daily snapshot of every weather
+   series' strikes and quotes at 15:00-18:00 local. A month of clean
+   self-captured data in a month, with no vendor gap and no purge risk.
+   Cheap enough to run regardless of whether W1 succeeds, and it is the
+   only source that cannot be taken away.
+
+W3. **One manual observation tonight.** At 17:00 ET, once NYC has rolled
+   over 2F off the day's max, read what the above-max buckets are asking.
+   Base rate is 0.56% for NYC, 0.22% pooled across 20 cities. If they
+   quote 1c the idea dies on fees and the answer cost five minutes.
+
+W4. **Kalshi perpetual futures.** Whether Kalshi lists perps at all, and
+   if so their funding mechanism and settlement. Unverified — do not
+   assume the Alpha Stack's crypto-perp framing transfers.
+
+## Data we do not have, checked 2026-09-01
+
+- **Sharadar options and futures: not entitled.** SEP, SFP and SF3 return
+  data; OPT, SFO and FUT all return HTTP 403. Anything from Alpha Stack
+  episode 3 that needs options or futures history is blocked on buying a
+  dataset, not on writing code. SF3 being entitled matters separately —
+  it is institutional holdings, the "I" in CAN SLIM, and F1 needs it.
+
 ## Next, in order
 0a. **Run I1 — the insider study.** Registered 2026-08-31. The only
    orthogonal signal available and the only one with a mechanism behind
