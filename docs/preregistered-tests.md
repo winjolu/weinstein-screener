@@ -4429,3 +4429,99 @@ paper trading and see" into a defined wait with an end date.
 - Weekly returns are serially correlated in a trend strategy, so the
   annualised figures carry the usual square-root-of-time optimism.
   Reported alongside the weekly values rather than instead of them.
+
+---
+
+# PRE-REGISTRATION — I1: do insider open-market purchases predict returns?
+
+Written 2026-08-31, **before** the study is run. An earlier exploratory
+look suggested code-P purchases beat a random control at roughly +2.60%
+against +1.03% absolute at 21 days. **That result does not count and is
+not being defended here.** It was never registered, never significance
+tested, never costed, and was never written to disk — it existed only in
+conversation. This registration exists so the question can be answered
+properly, and the earlier number is treated as the reason to look rather
+than as evidence.
+
+## Why this is worth a look at all
+
+Every price screen tested so far re-asks a question the others already
+answered — ten SATA attributes lost to a single price band, TMFC
+correlates 0.97 with SPY. Insider filings are the only genuinely
+orthogonal input available, and unlike a moving-average crossover there
+is a reason for an edge to exist: someone with private knowledge is
+spending their own money.
+
+## Hypothesis, stated before looking
+
+**H1.** Open-market purchases (SEC transaction code P) are followed by
+positive abnormal returns over 21 trading days, larger than a random
+control drawn from the same universe and the same calendar dates.
+
+**H0.** No difference beyond the control.
+
+## Design
+
+- **Data.** `insiders` in the archive: 11,491,880 filings, of which
+  678,130 are code P. Filings only; no price data enters the selection.
+- **Universe.** The same point-in-time rule as W2 — domestic common
+  stock, real exchange, listed at the event date.
+- **Event date.** The **filing** date, not the transaction date. The
+  transaction date is unknowable to a trader until it is filed, and
+  using it would be exactly the look-ahead leak that produced the
+  +19.48%/yr result. Median filing lag measured at 2 days; the
+  distribution of that lag gets reported, not just its median.
+- **Horizons.** 5, 21 and 63 trading days, fixed now. No horizon may be
+  added after seeing results.
+- **Abnormal return.** Raw return minus IWM over the same window, per
+  B2's size-matching. Both raw and abnormal reported.
+
+## Controls, all three required
+
+1. **Random control** — same number of (ticker, date) pairs drawn from
+   the same universe and calendar, 40 draws.
+2. **Shuffled-filing control** — real filing dates reassigned at random
+   between tickers. Preserves every distributional property and destroys
+   only the link to the company.
+3. **Code-S control** — insider *sales* over the same windows. Sales
+   happen for liquidity, diversification and tax reasons, so they should
+   carry much weaker signal. If buys and sells look alike, the result is
+   a filing-date artifact rather than information.
+
+## Significance and costs
+
+- Standard errors **clustered by firm and by date**. Insiders at one
+  company file together, and everyone files after the same market moves;
+  ignoring either dimension overstates significance.
+- Costs charged at the same rate as every other arm here.
+- **Nothing below |t| = 3.0 will be described as a finding.** Higher than
+  the usual bar of 2.0 because this is a fishing expedition through a
+  large filings table.
+- The result gets deflated over the number of variants tried, per C4.
+
+## What would count as each outcome
+
+- **Support:** code P beats all three controls at all three horizons,
+  |t| ≥ 3.0 after costs and clustering.
+- **Partial:** beats the controls at some horizons, or at |t| between 2
+  and 3. Recorded as suggestive, not acted on, and re-tested out of
+  sample before anything else.
+- **Refuted:** fails any control, or does not clear |t| = 2. **This is
+  the outcome I expect**, on the base rate of this project — every
+  apparent edge so far has been a measurement defect.
+- **Void:** if the filing-date join turns out to leak, the arm is
+  discarded rather than patched.
+
+## Second implementation
+
+The study will be run twice: once in Python and once in **Stata**, whose
+event-study and clustered-error tooling is more mature than anything
+here. Agreement between two independent implementations is the evidence;
+disagreement means at least one is wrong and neither gets reported.
+Stata stays outside the pipeline — a second opinion, not a dependency.
+
+## Follow-ups, registered now so they are not chosen later
+
+Split by dollar size of purchase and by insider role (officer, director,
+10% owner). Both splits are declared now; picking whichever split looks
+best afterwards is the thing this section prevents.

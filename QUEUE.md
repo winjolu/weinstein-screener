@@ -61,6 +61,13 @@ market_core; only chapter 7's strategy content would be a new project.
    content rather than another momentum variant.
 
 ## Next, in order
+0a. **Run I1 — the insider study.** Registered 2026-08-31. The only
+   orthogonal signal available and the only one with a mechanism behind
+   it. Run in Python and again in Stata (free through CSUSM) as an
+   independent check; report only if both agree. F1 is also registered
+   and unrun — it is in preregistered-tests.md but was never listed
+   here, which is how a registered test gets forgotten.
+
 0. ~~**Re-run every published arm under a pinned configuration.**~~ Done
    2026-08-20 as B2. Ten arms re-run on a rebuilt 10,227-ticker cache,
    reconstructed universes and one recorded configuration. W2 arms

@@ -21,6 +21,7 @@ convention as it actually emerged.
 | **D** | **Data integrity** — ticker identity, delisting census, survivorship bounding. |
 | **B** | **Benchmark** — what the strategy is measured against. |
 | **C** | **Chan** — methodology adopted from the Chan text: selection bias, minimum track record, stationarity. |
+| **I** | **Insider** — SEC Form 4 filings as a signal. |
 | **K** | **K-nearest neighbour** — the single machine-learning test. |
 
 ## Status legend
@@ -123,6 +124,12 @@ not yet run · **defect** revealed a bug rather than a result
 | id | question | outcome |
 |---|---|---|
 | C4 | does the best arm survive being discounted by the size of the search | **closed** — probabilistic Sharpe 0.998 falls to **0.535** deflated over 237 trials. The best configuration clears the selection-adjusted bar by 0.0033 weekly |
+
+## I — insider filings
+
+| id | question | outcome |
+|---|---|---|
+| I1 | do insider open-market purchases (code P) predict abnormal returns | **open** — registered 2026-08-31, not yet run. An earlier unregistered look suggested +2.60% vs +1.03% absolute at 21 days; that does not count |
 
 ## K — machine learning
 
