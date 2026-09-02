@@ -51,6 +51,47 @@ class SanitiseTest(unittest.TestCase):
         self.assertNotIn("secret", out)
 
 
+class LogFilterTest(unittest.TestCase):
+    """Sanitising exceptions was not enough.
+
+    The SDK logs the entire signed request through its own logger at
+    ERROR level before raising, so a 417 on a bad query parameter printed
+    a live app key and access token to the terminal twice. The filter has
+    to sit on the logger, which is the only place that output passes
+    through.
+    """
+
+    def test_a_record_with_credentials_is_redacted(self):
+        import logging
+        broker.install_log_sanitiser()
+        record = logging.LogRecord(
+            "webull.core.client", logging.ERROR, __file__, 1,
+            'Request: {"x-app-key": "%s", "x-access-token": "%s"}',
+            ("ffffffffffffffffffffffffffffffff", "0000deadbeef0000cafe11"), None)
+        for f in logging.getLogger("webull.core.client").filters:
+            f.filter(record)
+        out = record.getMessage()
+        self.assertNotIn("ffffffffffffffffffffffffffffffff", out)
+        self.assertNotIn("0000deadbeef0000cafe11", out)
+        self.assertIn("redacted", out)
+
+    def test_an_ordinary_record_is_untouched(self):
+        import logging
+        broker.install_log_sanitiser()
+        record = logging.LogRecord("webull.core.client", logging.INFO,
+                                   __file__, 1, "fetching %s bars", (200,), None)
+        for f in logging.getLogger("webull.core.client").filters:
+            f.filter(record)
+        self.assertEqual(record.getMessage(), "fetching 200 bars")
+
+    def test_installing_twice_does_not_stack_filters(self):
+        import logging
+        before = len(logging.getLogger("webull.core.client").filters)
+        broker.install_log_sanitiser()
+        broker.install_log_sanitiser()
+        self.assertEqual(len(logging.getLogger("webull.core.client").filters), before)
+
+
 class NumberTest(unittest.TestCase):
     def test_strings_are_read_as_numbers(self):
         self.assertEqual(broker._number("103.32"), 103.32)

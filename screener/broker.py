@@ -69,6 +69,54 @@ def sanitise(text):
     return out
 
 
+class _SanitisingFilter(__import__("logging").Filter):
+    """Redacts credentials out of every log record the SDK emits.
+
+    Wrapping exceptions is not enough and this is why: the vendor SDK
+    logs the entire signed request — headers included — through its own
+    logger at ERROR level, *before* raising. That output goes straight to
+    stderr and never passes through `_call`, so a 417 on a bad query
+    parameter printed a live x-app-key and x-access-token to the terminal
+    twice before anyone noticed. Filtering at the logger is the only
+    place that catches it, because it is the only place the SDK's own
+    output goes through.
+    """
+
+    def filter(self, record):
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
+        cleaned = sanitise(message)
+        if cleaned != message:
+            record.msg, record.args = cleaned, ()
+        return True
+
+
+_LOG_FILTER = _SanitisingFilter()
+
+
+def install_log_sanitiser():
+    """Attach the redacting filter to every logger the SDK writes through.
+
+    Idempotent, and called at import of this module and of data_fetch so
+    that merely importing the client is enough to be safe. Attaches to the
+    root logger as well, since the SDK creates loggers lazily by module
+    name and a filter on a parent is not inherited by handlers already
+    attached to a child.
+    """
+    import logging
+    names = ["", "webull", "webull.core", "webull.core.client",
+             "webull.core.http", "webull.core.http.initializer.token"]
+    for name in names:
+        logger = logging.getLogger(name)
+        if _LOG_FILTER not in logger.filters:
+            logger.addFilter(_LOG_FILTER)
+        for handler in logger.handlers:
+            if _LOG_FILTER not in handler.filters:
+                handler.addFilter(_LOG_FILTER)
+
+
 class BrokerError(RuntimeError):
     """A broker call failed, with the credentials taken out of the message."""
 
@@ -253,3 +301,6 @@ def sync(account=None, record=True):
     if record:
         db.save_broker_snapshot(snapshot)
     return snapshot
+
+
+install_log_sanitiser()

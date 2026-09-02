@@ -6,6 +6,14 @@ show Market Data client code directly, so I confirmed these against the SDK
 source itself.
 """
 import datetime
+
+# Redact credentials from the vendor SDK's own logging before any client
+# is built. The SDK writes the whole signed request, headers included, to
+# stderr on an error — importing this first is what keeps a 417 from
+# printing a live access token.
+from .broker import install_log_sanitiser as _install_log_sanitiser
+_install_log_sanitiser()
+
 import os
 
 try:
