@@ -90,6 +90,35 @@ W4. **Kalshi perpetual futures.** Whether Kalshi lists perps at all, and
    if so their funding mechanism and settlement. Unverified — do not
    assume the Alpha Stack's crypto-perp framing transfers.
 
+## Crowding — queued behind the insider and Kalshi work
+
+X1. **Does institutional crowding explain momentum's failure here?**
+   Raised by the Alpha Stack response: raw momentum is not the strategy,
+   crowding-adjusted momentum is, and MSCI found that filtering the most
+   over-owned names restored the risk/return profile through 2024.
+   Testable from data already held — SF3 is entitled and `holdings`
+   carries 79,638,808 rows.
+
+   Runs **after** I1 (insiders) and after the Kalshi archive, because
+   those two are orthogonal signals with mechanisms and this one is a
+   refinement to a leg that has already failed.
+
+   **Prediction, recorded now:** it fails. Roughly 10-15% that
+   crowding-adjusted momentum beats raw momentum at |t| >= 2, under 5%
+   that the combination beats buy-and-hold. Three reasons: momentum has
+   no surviving edge in the corrected universe, so a better sort of
+   nothing is still nothing; the crowding story is a mega-cap story and
+   this universe is mostly small; and 13F data is quarterly with a
+   45-day filing lag, so the positioning signal is up to 4.5 months
+   stale at the moment it would be traded.
+
+   **The one result that would change my mind**, written down so it
+   cannot be claimed afterwards: an effect concentrated in the *loser
+   tail* rather than the mean — most-crowded quintile underperforming
+   badly while the rest is flat. That is what a forced-unwind mechanism
+   should look like, and a mean-based test would miss it. Report the
+   quintile spread, not just the average.
+
 ## Data we do not have, checked 2026-09-01
 
 - **Sharadar options and futures: not entitled.** SEP, SFP and SF3 return
