@@ -2050,9 +2050,13 @@ anywhere. Hard-to-borrow names — the ones most attractive to short —
 carry the highest rates, so the cost is largest exactly where the setups
 look best. Add squeeze risk, which this engine cannot represent at all.
 
-**Practical blocker on top of the evidence:** short selling requires a
-margin account. Mine is a cash account, so none of this is
-tradeable as things stand regardless of what it measured.
+**Practical note on top of the evidence:** short selling requires a
+margin account. This originally recorded that I did not have one, which
+was wrong — the brokerage carries an `INDIVIDUAL_MARGIN` account
+alongside the cash one, unfunded, confirmed against the account
+interface on 2026-09-08. Corrected here rather than left standing: the
+conclusion above rests on the measured result and never rested on the
+account type, so nothing about it changes.
 
 ### Recommendation: stop work on the short side
 
@@ -4651,3 +4655,285 @@ treating those horizons as a stable effect at all. Still not acted on.
 The registered follow-up splits (dollar size, insider role) and the
 Stata cross-check remain the required next steps before this changes
 status.
+
+---
+
+# PRE-REGISTRATION — I2: are insider sales a short signal?
+
+Written 2026-09-08, before the conditioning tests are run. "Rats leave a
+sinking ship in a hurry" is the intuition: if insiders dump stock in
+size, the company is in trouble and the stock should fall.
+
+## What is already known, and therefore not blind
+
+I1 computed code-S returns as one of its three controls, so the
+*unconditional* answer is already in hand and this registration cannot
+claim it as a prediction. Mean costed abnormal return after a sale:
+
+| window | 5d | 21d | 63d |
+|---|---|---|---|
+| pooled 2008-2026 | -0.22% | -0.17% | -0.54% |
+| recent 2023-2025 | +0.00% | +0.28% | -0.21% |
+
+Slightly negative pooled, indistinguishable from zero recently. As an
+unconditional short signal this is already dead: none of those numbers
+survives a borrow fee, let alone the market's upward drift.
+
+**What has not been looked at, and is the entire content of this test:**
+whether *conditioning* on the size or the clustering of the sale finds a
+subset that does predict declines. A mean of roughly zero is exactly
+what a mixture of thousands of uninformative scheduled sales and a
+handful of genuinely informed ones would produce.
+
+## Hypotheses, all declared now
+
+- **H1 — absolute size.** Sales in the top decile by dollar value are
+  followed by more negative abnormal returns than the rest.
+- **H2 — size relative to market cap.** Top decile by
+  value / market cap. Limited to 2016 onward: `dailyfundamentals` begins
+  2016-01-04 and there is no market cap in the archive before it.
+- **H3 — size relative to liquidity.** Top decile by
+  value / median daily dollar volume — how many days of ordinary
+  turnover the insider dumped. Uses `market_core.liquidity.dollar_volume`,
+  which refuses to return a number when reverse-split quantisation has
+  destroyed the volume rather than guessing one.
+- **H4 — clustering.** Companies where three or more distinct insiders
+  file sales within 30 days, against isolated single-seller sales. This
+  is the literal form of the sinking-ship claim: it is about how many
+  are leaving, not how much one of them sold.
+- **H5 — the tail and the shipwreck.** Two outcomes a mean cannot show:
+  the probability of a return below -20%, and the probability the ticker
+  stops trading within 252 trading days *after falling at least 50%*
+  from its price on the filing date. The decline qualifier is part of
+  the definition rather than an afterthought, because roughly 60% of
+  the companies that leave this archive were acquired, and an
+  acquisition usually leaves at a premium — a raw delisting count would
+  measure takeovers and report them as shipwrecks. Both the qualified
+  and unqualified rates are reported so the confound is visible rather
+  than assumed away. A signal that predicts rare disasters and nothing
+  else would be invisible in H1-H4 and is the version of this
+  hypothesis most likely to be true.
+
+## Design, fixed before running
+
+- **Event date: the filing date**, never the transaction date, for the
+  same reason as I1 — the transaction is unknowable until it is filed.
+- **Universe:** the same point-in-time rule as I1.
+- **Horizons: 5, 21, 63** trading days for returns; **252** for the
+  delisting outcome. No horizon may be added after seeing results.
+- **The unit of analysis is one company-day, not one filing.** Several
+  insiders routinely file on the same day at the same company, and four
+  filings by one person in a week is one decision rather than four. So
+  filings are aggregated to (ticker, filing date): the dollar value is
+  summed, and the number of distinct sellers is counted. Leaving them
+  as separate rows would let a single day's return enter the sample
+  many times over and would count paperwork as conviction.
+- **Deciles are formed within each calendar month**, not pooled. A
+  $5M sale in 2009 and a $5M sale in 2026 are not the same event, and
+  pooling would confound size with the passage of time.
+- **Controls:** the same three as I1 — random (ticker, date) pairs,
+  shuffled filing dates, and code-P purchases as the opposite-sign
+  control.
+- **Standard errors clustered two ways**, by firm and by filing date.
+- **Nothing below |t| = 3.0 is a finding**, matching I1.
+- **Both windows reported**: pooled 2008-2026 and 2023-2025 alone. A
+  result appearing in only one of them is partial, as in I1.
+
+## Costs, which decide this test rather than decorate it
+
+Shorting is not the mirror image of buying and must not be costed as if
+it were. `BrokerProfile` has carried a `short_borrow_apr` field since it
+was written and **nothing has ever read it** — a short study run through
+the existing cost path would silently charge zero borrow. Implementing
+it is part of this test rather than a side errand.
+
+Two assumptions, both reported:
+
+- **1% APR**, general collateral, appropriate for large liquid names.
+- **8% APR**, the hard-to-borrow case, which is the relevant one because
+  the names that attract heavy insider selling skew small and thin.
+
+Real hard-to-borrow rates run far above 8% and the archive holds no
+borrow-availability data at all, so **every short result here is an
+upper bound on what was achievable**, not an estimate of it.
+
+## What would count as each outcome
+
+- **Support:** a declared conditioning variable produces significantly
+  negative abnormal returns at |t| >= 3.0, surviving the 8% borrow
+  assumption, in **both** windows.
+- **Partial:** significant in one window only, or only before borrow.
+- **Refuted:** no declared variable clears the bar, or the effect does
+  not survive costs.
+- **Expected: refuted.** Four reasons, recorded now: the unconditional
+  effect is already measured at roughly zero; the literature finds sales
+  far less informative than purchases because they are dominated by
+  diversification, tax and scheduling motives; a short fights the
+  market's upward drift, so it needs a large negative edge merely to
+  break even; and every apparent edge in this project so far has turned
+  out to be a measurement defect.
+
+## The confound that cannot be controlled here
+
+Most insider selling happens under 10b5-1 plans, scheduled months in
+advance and carrying no information by construction. **The archive does
+not flag them.** No proxy is attempted, because a wrong proxy would be
+worse than a stated limitation. The consequence is asymmetric and worth
+stating plainly: the informative sales are diluted by uninformative
+ones, so a null result here is weaker evidence of "no signal" than it
+appears, while a positive result would be stronger than it appears.
+
+## What this test can actually change
+
+Short selling requires a margin account, and one exists — an unfunded
+`INDIVIDUAL_MARGIN` account confirmed against the account interface on
+2026-09-08, alongside the cash account. So a supportive result here
+would be actionable after funding, and shorting is a live option rather
+than a hypothetical one.
+
+**What is actually binding is borrow, and there is no data for it.**
+The broker charges a stock loan rate set per name per day against the
+closing market value, plus a hard-to-borrow rate on names in short
+supply, both on a 360-day basis. None of that is exposed through the
+account interface and none of it is in this archive, so every borrow
+figure here is an assumption rather than a measurement — and the thin
+names that generate short signals are exactly the ones where borrow is
+dearest or unavailable outright, which is a constraint no rate can
+represent.
+
+The decision this test still most usefully informs is the long side:
+whether heavy or clustered insider selling is worth using as an exit or
+avoid filter on positions already held, which needs no borrow at all.
+
+## Result, run 2026-09-08
+
+**Outcome: refuted as a short signal. One component supported as a
+risk filter, and confined to microcaps.** 519,840 company-day sale
+events, 2008-2026.
+
+Two of the five hypotheses did not merely fail — they came out
+**backwards**, consistently and significantly, in both windows and at
+every horizon. That is a more useful result than a null.
+
+### H1, absolute dollar size: refuted, inverted
+
+| window / horizon | top decile | rest | diff | t |
+|---|---|---|---|---|
+| pooled 21d | +0.090% | -0.197% | **+0.287%** | +3.55 |
+| pooled 63d | +0.405% | -0.307% | **+0.712%** | +3.68 |
+| recent 21d | +0.567% | -0.210% | **+0.777%** | +2.90 |
+
+The largest dollar sales are followed by *better* returns than the rest,
+and by a **lower** probability of a 20% fall (10.87% against 13.39% at
+63 days, t=-7.24) and a lower probability of collapse (0.08% against
+0.32%, t=-9.05). The reason is not subtle once seen: the biggest dollar
+sales happen at the biggest companies, by executives whose holdings
+became worth selling because the stock already went up. Shorting on
+"a huge insider sale" is not a weak signal, it is the wrong sign.
+
+### H4, clustering: refuted, inverted, and this is the sinking-ship claim itself
+
+| window / horizon | 3+ sellers | isolated seller | diff | t |
+|---|---|---|---|---|
+| pooled 5d | -0.069% | -0.261% | +0.192% | +6.10 |
+| pooled 21d | +0.047% | -0.451% | +0.498% | +6.25 |
+| pooled 63d | +0.120% | -0.716% | +0.837% | +4.42 |
+| recent 21d | +0.470% | -0.813% | +1.284% | +5.66 |
+| recent 63d | +0.786% | -1.684% | +2.470% | +4.31 |
+
+When several insiders sell at once the stock does **better** afterwards
+than when one sells alone, everywhere, with t-statistics up to +6.3.
+Clustered selling also predicts *less* disaster: it stops trading less
+often (3.27% against 4.00%, t=-4.00) and sinks less often (0.15%
+against 0.54%, t=-9.02).
+
+The mechanism is the same one that inverts H1. Several insiders selling
+together is what a company looks like after a run-up — options in the
+money, a lockup expiring, scheduled diversification firing at once. The
+lone seller is the idiosyncratic one, and the lone seller is the one
+whose stock does worse. "Rats leaving in a hurry" describes a crowd;
+the data says the crowd is the benign case.
+
+### H2 and H3, size relative to the company: the returns do not survive a size control
+
+Both relative measures produce significantly negative abnormal returns
+pooled, and H3 (value against ordinary turnover) clears |t| = 3.0 at 5
+days in **both** windows — pooled -0.157% at t=-3.12, recent -0.576% at
+t=-3.82 — which is the letter of the registered support condition, and
+it stays positive after the 8% borrow charge.
+
+**It does not survive being split by company size, and that check was
+not registered.** Recording it as an unregistered addition rather than
+folding it into the headline, because adding an analysis after seeing
+results is the thing pre-registration exists to prevent — noting that
+this one *removes* a positive finding rather than creating one, which
+is the conservative direction:
+
+| size bucket | top decile | rest | diff | t |
+|---|---|---|---|---|
+| micro | -0.683% | -0.368% | -0.314% | -2.39 |
+| small | -0.423% | -0.205% | -0.218% | -1.98 |
+| mid | -0.042% | -0.102% | +0.059% | +0.54 |
+| large | -0.187% | -0.093% | -0.094% | -0.77 |
+| mega | +0.204% | +0.024% | +0.180% | +1.11 |
+
+Nothing clears the bar inside any bucket. The pooled significance was
+substantially the size effect: the measure selects small companies, and
+small companies drift down after insider sales. On top of that, the
+surviving microcap edge of roughly half a percent over five days is
+smaller than the spread on the names that generate it — before borrow
+availability, which for thin names is the binding constraint rather
+than the rate.
+
+### H5, the tail and the shipwreck: supported, and confined to microcaps
+
+This is the hypothesis the registration called most likely to be true,
+and it is the one that holds. Sales large *relative to the company* —
+not large in dollars — predict catastrophic outcomes:
+
+| measure | top decile sank | rest sank | diff | t |
+|---|---|---|---|---|
+| value / market cap | 1.57% | 0.21% | +1.36pp | +8.02 |
+| value / turnover | 1.05% | 0.21% | +0.84pp | +8.44 |
+
+"Sank" is the registered qualified outcome: stopped trading within 252
+trading days having already lost at least half its value. Excluding the
+85 rows whose ratio exceeds the entire market cap — data errors,
+almost all of them one serial reverse-splitter — moves the top-decile
+rate from 1.57% to 1.54%, so the finding does not rest on them.
+
+**Controlled for size**, again unregistered and again conservative:
+
+| size bucket | top decile sank | rest sank | diff | t |
+|---|---|---|---|---|
+| micro | 3.33% | 1.10% | **+2.23pp** | +6.31 |
+| small | 0.23% | 0.05% | +0.17pp | +1.77 |
+| mid and above | 0.00-0.01% | 0.01% | ~0 | under 2 |
+
+Among microcaps, heavy relative insider selling roughly **triples** an
+already-elevated probability of collapse. Above microcap the outcome is
+so rare — one in ten thousand — that there is nothing to predict.
+
+### What this changes
+
+Not a short. The return effects are tiny, inverted where the intuition
+is strongest, and gone once size is held constant; the account is a cash
+account regardless, exactly as recorded when the stage-analysis short
+side was closed.
+
+What survives is the registered deliverable: a **risk filter for
+positions already held**. For a microcap, an insider selling an unusual
+fraction of the company in a day is associated with a three-fold rise
+in the chance the company is gone and down more than half within the
+year. The absolute rate stays low at 3.3%, so this belongs in position
+sizing and exit rules, not in a signal that fires a trade.
+
+### On the number of comparisons
+
+Roughly sixty tests are reported above. At that count several
+|t| around 3 are expected from noise alone, which is why the marginal
+H2 and H3 return results are treated as refuted rather than partial.
+The findings carried forward — the H1 and H4 inversions and the H5 tail
+— sit at |t| of 6 to 13 and survive any reasonable deflation, but they
+have not been formally deflated per C4 and should not be quoted as if
+they had.

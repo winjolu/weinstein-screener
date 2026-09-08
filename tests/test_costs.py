@@ -111,3 +111,64 @@ class ProfileRegistryTest(unittest.TestCase):
     def test_webull_is_one_profile_among_several_not_the_assumption(self):
         self.assertIn("Webull", costs.PROFILES)
         self.assertIn("No fees", costs.PROFILES)
+
+
+class ShortBorrowTest(unittest.TestCase):
+    """The borrow fee, which decides whether a short is worth placing.
+
+    `short_borrow_apr` sat on BrokerProfile from the day it was written
+    and nothing ever read it, so every short costed through this module
+    was charged zero borrow — the fee that matters most on the side
+    where it matters most.
+    """
+
+    def test_the_rate_accrues_on_notional_over_calendar_days(self):
+        profile = costs.BrokerProfile("test", short_borrow_apr=10.0)
+        # A 360-day basis, which is the convention brokers actually use
+        # and which Webull states in its own stock-loan formula. $10,000
+        # at 10% costs $1,000 over 360 days, not over 365.
+        self.assertAlmostEqual(profile.borrow(10_000.0, 360), 1000.0)
+        self.assertAlmostEqual(profile.borrow(10_000.0, 180), 500.0)
+
+    def test_no_rate_or_no_days_costs_nothing(self):
+        self.assertEqual(costs.WEBULL.borrow(10_000.0, 365), 0.0)
+        self.assertEqual(costs.WEBULL_SHORT_HTB.borrow(10_000.0, 0), 0.0)
+
+    def test_a_long_round_trip_is_unchanged_by_the_new_parameters(self):
+        """The borrow charge must not appear underneath existing
+        long-side results, which is why side defaults to long."""
+        before = costs.WEBULL.round_trip(100.0, 110.0, 10.0)
+        after = costs.WEBULL_SHORT_HTB.round_trip(100.0, 110.0, 10.0,
+                                                  holding_days=90)
+        self.assertAlmostEqual(before, after)
+
+    def test_shorting_costs_more_than_the_same_trade_held_long(self):
+        long_side = costs.WEBULL_SHORT_HTB.round_trip(
+            100.0, 110.0, 10.0, holding_days=90, side="long")
+        short_side = costs.WEBULL_SHORT_HTB.round_trip(
+            100.0, 110.0, 10.0, holding_days=90, side="short")
+        self.assertGreater(short_side, long_side)
+        # $1,000 notional, 8% a year, 90 days on a 360-day basis = $20.
+        self.assertAlmostEqual(short_side - long_side, 1000 * 0.08 * 90 / 360)
+
+    def test_cost_pct_charges_borrow_only_when_told_it_is_a_short(self):
+        trade = {"entry_price": 50.0, "exit_price": 45.0, "holding_days": 90}
+        as_long = costs.cost_pct(trade, profile=costs.WEBULL_SHORT_HTB)
+        as_short = costs.cost_pct(trade, profile=costs.WEBULL_SHORT_HTB,
+                                  side="short")
+        self.assertGreater(as_short, as_long)
+        # 8% a year over 90 days on the full stake, in percent.
+        self.assertAlmostEqual(as_short - as_long, 8.0 * 90 / 360, places=6)
+
+    def test_a_trade_with_no_holding_days_is_not_silently_free_to_borrow(self):
+        """A caller that forgets holding_days gets zero borrow, so the
+        omission has to be visible in the result rather than plausible.
+        The guard is that the two rates must differ once days are given."""
+        trade = {"entry_price": 50.0, "exit_price": 45.0}
+        gc = costs.cost_pct(trade, profile=costs.WEBULL_SHORT_GC, side="short")
+        htb = costs.cost_pct(trade, profile=costs.WEBULL_SHORT_HTB, side="short")
+        self.assertAlmostEqual(gc, htb)
+        with_days = dict(trade, holding_days=90)
+        self.assertNotAlmostEqual(
+            costs.cost_pct(with_days, profile=costs.WEBULL_SHORT_GC, side="short"),
+            costs.cost_pct(with_days, profile=costs.WEBULL_SHORT_HTB, side="short"))

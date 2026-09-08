@@ -128,6 +128,36 @@ X1. **Does institutional crowding explain momentum's failure here?**
   it is institutional holdings, the "I" in CAN SLIM, and F1 needs it.
 
 ## Next, in order
+0aa. ~~**I2 — are insider sales a short signal?**~~ Run 2026-09-08.
+   **Refuted as a short.** The unconditional answer is already in hand from I1's
+   code-S control and is roughly zero, so this tests only the
+   conditioning: sale size in dollars, against market cap, and against
+   ordinary turnover; three or more distinct sellers inside 30 days;
+   and the disaster tail, including whether the company stopped trading
+   within a year having already lost half its value.
+
+   **The two headline results are inversions, not nulls.** The largest
+   dollar sales and clustered selling by three or more insiders both
+   precede *better* returns and *fewer* collapses — the sinking-ship
+   intuition has the sign backwards, because a crowd of sellers is what
+   a company looks like after a run-up. What survives is a risk filter
+   confined to microcaps: a sale large against market cap triples the
+   probability of collapse within a year, 3.33% against 1.10%. Full
+   breakdown in docs/preregistered-tests.md.
+
+   **Two things this surfaced before producing any result.** First,
+   `BrokerProfile.short_borrow_apr` had existed since the module was
+   written and nothing ever read it, so every short costed through the
+   shared code was charged zero to borrow — now implemented, charged on
+   the 360-day basis the broker actually uses, at 1% and 8% a year, both
+   optimistic. Second, the S7 blocker was recorded wrongly and is now
+   corrected: an unfunded `INDIVIDUAL_MARGIN` account does exist, so
+   shorting is a funding question rather than a permission one. What
+   binds instead is borrow — a per-name daily stock loan rate plus a
+   hard-to-borrow charge, none of it exposed through the account
+   interface or held in this archive. **Serious short work needs borrow
+   and short-interest data bought before it needs the account funded.**
+
 0a. ~~**Run I1 — the insider study, then retest it out of sample.**~~
    Pooled 2008-2026 run 2026-09-07: **partial**, code P beats all three
    controls at 5 and 21 trading days at |t| >= 3.0; at 63 days the

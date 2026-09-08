@@ -261,20 +261,27 @@ def shuffled_control(events, by_ticker, bench_dates, bench_close,
     return event_returns(frame, by_ticker, bench_dates, bench_close, horizons)
 
 
-def two_way_test(a, b, cluster_col="ticker", date_col="filingdate"):
-    """Cluster-robust test that group `a`'s mean costed abnormal return
-    exceeds group `b`'s — a regression of the return on a 1/0 group
-    dummy, clustered by firm and by filing date at once."""
+def two_way_test(a, b, cluster_col="ticker", date_col="filingdate",
+                 value_col="abnormal_costed_pct"):
+    """Cluster-robust test that group `a`'s mean exceeds group `b`'s — a
+    regression of the outcome on a 1/0 group dummy, clustered by firm
+    and by filing date at once.
+
+    `value_col` defaults to the costed abnormal return this was written
+    for. I2 passes other outcomes through it — an uncosted excess, a
+    short P&L net of borrow, a 0/1 delisting flag — and the clustering
+    argument is identical for all of them.
+    """
     combined = pd.concat([a.assign(_group=1.0), b.assign(_group=0.0)],
                          ignore_index=True)
     out = ts.cluster_two_way(
-        combined["abnormal_costed_pct"].to_numpy(),
+        combined[value_col].to_numpy(dtype=float),
         combined["_group"].to_numpy(),
         combined[cluster_col].to_numpy(),
         combined[date_col].to_numpy())
     return {"n_a": len(a), "n_b": len(b),
-            "mean_a": float(a["abnormal_costed_pct"].mean()),
-            "mean_b": float(b["abnormal_costed_pct"].mean()),
+            "mean_a": float(a[value_col].astype(float).mean()),
+            "mean_b": float(b[value_col].astype(float).mean()),
             "diff": out["params"][1], "tvalue": out["tvalues"][1],
             "pvalue": out["pvalues"][1], "clipped": out["clipped"]}
 
@@ -296,10 +303,11 @@ def raw_vs_passive(frame):
     return raw_mean, passive_mean
 
 
-def mean_vs_zero(frame, cluster_col="ticker", date_col="filingdate"):
-    """Cluster-robust test that a group's mean costed abnormal return is
-    different from zero on its own, without reference to a control."""
-    out = ts.cluster_mean(frame["abnormal_costed_pct"].to_numpy(),
+def mean_vs_zero(frame, cluster_col="ticker", date_col="filingdate",
+                 value_col="abnormal_costed_pct"):
+    """Cluster-robust test that a group's mean outcome is different from
+    zero on its own, without reference to a control."""
+    out = ts.cluster_mean(frame[value_col].to_numpy(dtype=float),
                           frame[cluster_col].to_numpy(),
                           frame[date_col].to_numpy())
     return {"n": out["nobs"], "mean": out["mean"],

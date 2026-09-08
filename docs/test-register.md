@@ -129,6 +129,7 @@ not yet run · **defect** revealed a bug rather than a result
 
 | id | question | outcome |
 |---|---|---|
+| I2 | are insider sales a short signal, conditioned on size or clustering | **closed** — run 2026-09-08. Refuted as a short, and two hypotheses came out **backwards**: the largest dollar sales and clustered selling by 3+ insiders both precede *better* returns and *fewer* collapses (t up to +6.3 and -9.0). Relative-size return effects vanish once controlled for company size. What survives is a risk filter: among microcaps, a sale large against market cap triples the chance of collapse within a year (3.33% vs 1.10%, t=+6.31) |
 | I1 | do insider open-market purchases (code P) predict abnormal returns | **partial** — pooled 2008-2026 run 2026-09-07, then retested 2023-2025 only. 5-day signal replicates cleanly in both windows (|t| > 10). 21- and 63-day are real by some comparisons in both windows but never clear all three controls together, and fail in different ways between the two periods. Not acted on |
 
 ## K — machine learning
