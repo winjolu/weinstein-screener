@@ -129,7 +129,7 @@ not yet run · **defect** revealed a bug rather than a result
 
 | id | question | outcome |
 |---|---|---|
-| I1 | do insider open-market purchases (code P) predict abnormal returns | **partial** — run 2026-09-07. Beats all three controls at |t| > 3 at 5 and 21 trading days; at 63 days the shuffled-date control catches up completely (both ~+1.95%), so the 63-day return is a company trait, not filing timing. Not acted on; out-of-sample retest is the required next step |
+| I1 | do insider open-market purchases (code P) predict abnormal returns | **partial** — pooled 2008-2026 run 2026-09-07, then retested 2023-2025 only. 5-day signal replicates cleanly in both windows (|t| > 10). 21- and 63-day are real by some comparisons in both windows but never clear all three controls together, and fail in different ways between the two periods. Not acted on |
 
 ## K — machine learning
 

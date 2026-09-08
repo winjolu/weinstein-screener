@@ -72,15 +72,25 @@ def eligible_tickers(conn):
                    tickers["category"].isin(DOMESTIC_COMMON)].set_index("ticker")
 
 
-def insider_events(conn, eligible):
+def insider_events(conn, eligible, filing_start=None, filing_end=None):
     """Code P and S filings, restricted to the point-in-time universe.
 
     Filing date only enters the selection — no price data does — which
     is the whole point of an orthogonal signal.
+
+    `filing_start`/`filing_end` restrict which filings are looked at,
+    not which prices are loaded — a filing near the end of the window
+    still needs price history past it to resolve a 63-day forward
+    return, so the price panel is loaded over its own full range
+    regardless of this filter.
     """
     events = pd.read_sql(
         "SELECT ticker, filingdate, transactioncode FROM insiders "
         "WHERE transactioncode IN ('P','S') AND filingdate IS NOT NULL", conn)
+    if filing_start:
+        events = events[events["filingdate"] >= filing_start]
+    if filing_end:
+        events = events[events["filingdate"] <= filing_end]
     events = events[events["ticker"].isin(eligible.index)].copy()
     first_ok = events["ticker"].map(eligible["firstpricedate"]).fillna("0000-00-00")
     last_ok = events["ticker"].map(eligible["lastpricedate"]).fillna("9999-99-99")
@@ -113,12 +123,12 @@ def load_benchmark(conn, ticker="IWM"):
     return bars["date"].to_numpy(), bars["closeadj"].to_numpy(dtype=float)
 
 
-def load_panel(db_path=None):
+def load_panel(db_path=None, filing_start=None, filing_end=None):
     """Everything `event_returns` and the controls need, in one dict."""
     conn = sqlite3.connect(f"file:{db_path or sharadar.DB_PATH}?mode=ro", uri=True)
     try:
         eligible = eligible_tickers(conn)
-        events = insider_events(conn, eligible)
+        events = insider_events(conn, eligible, filing_start, filing_end)
         by_ticker = load_price_panel(conn, eligible.index)
         iwm_dates, iwm_close = load_benchmark(conn)
     finally:
@@ -269,6 +279,23 @@ def two_way_test(a, b, cluster_col="ticker", date_col="filingdate"):
             "pvalue": out["pvalues"][1], "clipped": out["clipped"]}
 
 
+def raw_vs_passive(frame):
+    """The two absolute numbers a strategy result is never allowed to
+    hide behind a bare excess return: what buying on the signal actually
+    returned, and what just holding the benchmark over the identical
+    windows returned. `abnormal_pct` is already `raw_pct` minus this
+    passive figure, so it's recovered by subtraction rather than
+    recomputed from the benchmark series a second time.
+
+    :return: (raw_mean_pct, passive_mean_pct), both NaN on an empty frame.
+    """
+    if len(frame) == 0:
+        return float("nan"), float("nan")
+    raw_mean = float(frame["raw_pct"].mean())
+    passive_mean = raw_mean - float(frame["abnormal_pct"].mean())
+    return raw_mean, passive_mean
+
+
 def mean_vs_zero(frame, cluster_col="ticker", date_col="filingdate"):
     """Cluster-robust test that a group's mean costed abnormal return is
     different from zero on its own, without reference to a control."""
@@ -279,15 +306,21 @@ def mean_vs_zero(frame, cluster_col="ticker", date_col="filingdate"):
             "tvalue": out["tvalue"], "pvalue": out["pvalue"]}
 
 
-def run(db_path=None, draws=RANDOM_DRAWS, verbose=True):
+def run(db_path=None, draws=RANDOM_DRAWS, verbose=True,
+        filing_start=None, filing_end=None):
     """The full registered comparison: code P against all three controls
     at all three horizons, using costed abnormal returns throughout.
+
+    `filing_start`/`filing_end` restrict which filings are tested — used
+    for the 2023-2025 out-of-sample retest, registered before it ran, to
+    ask whether the effect holds in a single recent regime rather than
+    pooled across eighteen years of very different ones.
 
     :return: dict keyed by horizon, each holding the P-vs-zero result
         and a P-vs-control result for each of the three controls.
     """
     t0 = time.time()
-    panel = load_panel(db_path)
+    panel = load_panel(db_path, filing_start, filing_end)
     events, by_ticker = panel["events"], panel["by_ticker"]
     eligible = panel["eligible"]
     bench_dates, bench_close = panel["iwm_dates"], panel["iwm_close"]
@@ -307,7 +340,10 @@ def run(db_path=None, draws=RANDOM_DRAWS, verbose=True):
         controls = {"random": r_ret[r_ret["horizon"] == h],
                     "shuffled": h_ret[h_ret["horizon"] == h],
                     "code_s": s_ret[s_ret["horizon"] == h]}
+        raw_mean, passive_mean = raw_vs_passive(p_h)
         results[h] = {
+            "raw_return_pct": raw_mean,
+            "passive_return_pct": passive_mean,
             "vs_zero": mean_vs_zero(p_h),
             "vs_control": {name: two_way_test(p_h, ctrl)
                           for name, ctrl in controls.items()},
@@ -315,7 +351,10 @@ def run(db_path=None, draws=RANDOM_DRAWS, verbose=True):
         if verbose:
             vz = results[h]["vs_zero"]
             print(f"\n--- horizon = {h} trading days ---")
-            print(f"P vs zero:     n={vz['n']:>7,}  mean={vz['mean']:+.3f}%  "
+            print(f"insider-buy raw return: {raw_mean:+.3f}%   "
+                  f"passive (hold IWM, same windows): {passive_mean:+.3f}%   "
+                  f"excess: {raw_mean - passive_mean:+.3f}%")
+            print(f"P vs zero (costed):     n={vz['n']:>7,}  mean={vz['mean']:+.3f}%  "
                   f"t={vz['tvalue']:+.2f}")
             for name, cmp in results[h]["vs_control"].items():
                 print(f"P vs {name:<8}: n_ctrl={cmp['n_b']:>9,}  "

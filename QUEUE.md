@@ -128,15 +128,22 @@ X1. **Does institutional crowding explain momentum's failure here?**
   it is institutional holdings, the "I" in CAN SLIM, and F1 needs it.
 
 ## Next, in order
-0a. ~~**Run I1 — the insider study.**~~ Run 2026-09-07 in Python.
-   **Partial**: code P beats all three controls at 5 and 21 trading
-   days at |t| >= 3.0; at 63 days the shuffled-date control catches up
-   completely, meaning the 63-day return is a company trait rather than
-   filing-timing information. Full breakdown in
-   docs/preregistered-tests.md. Not acted on. **Still outstanding before
-   this moves past partial**: the Stata cross-check (free through
-   CSUSM), the C4 deflation adjustment, and only then the two
-   pre-registered follow-up splits (dollar size, insider role). F1 is
+0a. ~~**Run I1 — the insider study, then retest it out of sample.**~~
+   Pooled 2008-2026 run 2026-09-07: **partial**, code P beats all three
+   controls at 5 and 21 trading days at |t| >= 3.0; at 63 days the
+   shuffled-date control catches up completely, meaning the 63-day
+   return is a company trait rather than filing-timing information.
+   Retested 2023-2025 only (a single recent regime, chosen before
+   running to avoid pooling across a financial crisis, a zero-rate
+   decade and a pandemic crash and calling the average "the effect"):
+   **still partial**, but for a different reason — 5 days replicates
+   cleanly (|t| > 10 in both windows), 21 and 63 days are real by some
+   comparisons in both windows but never clear all three controls
+   together, and fail against a different control in each window. Full
+   breakdown in docs/preregistered-tests.md. Not acted on. **Still
+   outstanding before this moves past partial**: the Stata cross-check
+   (free through CSUSM), the C4 deflation adjustment, and only then the
+   two pre-registered follow-up splits (dollar size, insider role). F1 is
    also registered and unrun — it is in preregistered-tests.md but was
    never listed here, which is how a registered test gets forgotten.
 

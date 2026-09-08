@@ -4541,11 +4541,17 @@ universe filter (domestic common stock, real exchange, listed on the
 filing date). Costed abnormal return against IWM, clustered two-way by
 firm and by filing date:
 
-| horizon | P vs zero | P vs random (40 draws) | P vs shuffled dates | P vs code-S |
-|---|---|---|---|---|
-| 5d  | +1.63%, t=+15.25 | +1.42% diff, t=+12.74 | +1.59% diff, t=+10.53 | +1.85% diff, t=+16.38 |
-| 21d | +1.71%, t=+7.06  | +1.32% diff, t=+4.74  | +1.40% diff, t=+5.20  | +1.88% diff, t=+6.97  |
-| 63d | +1.94%, t=+4.26  | +0.40% diff, t=+0.45  | **-0.03% diff, t=-0.03** | +2.48% diff, t=+4.70 |
+| horizon | insider-buy raw | passive (hold IWM) | P vs zero | P vs random (40 draws) | P vs shuffled dates | P vs code-S |
+|---|---|---|---|---|---|---|
+| 5d  | +1.73% | +0.10% | +1.63%, t=+15.25 | +1.42% diff, t=+12.74 | +1.59% diff, t=+10.53 | +1.85% diff, t=+16.38 |
+| 21d | +2.74% | +1.02% | +1.71%, t=+7.06  | +1.32% diff, t=+4.74  | +1.40% diff, t=+5.20  | +1.88% diff, t=+6.97  |
+| 63d | +4.81% | +2.86% | +1.94%, t=+4.26  | +0.40% diff, t=+0.45  | **-0.03% diff, t=-0.03** | +2.48% diff, t=+4.70 |
+
+The first two columns are absolute — what buying on the signal actually
+returned, and what simply holding IWM over the identical windows
+returned. Everything after that is excess over the passive column, not
+a return in its own right, and needs both absolute figures next to it
+to be read correctly.
 
 **What the 63-day breakdown means.** The shuffled-date control keeps the
 same tickers and only randomises which filing date attaches to which —
@@ -4568,3 +4574,80 @@ The two-way clustering this needed did not exist anywhere in the shared
 package and was added as `market_core.timeseries.cluster_two_way` and
 `cluster_mean`, since a data-layer capability belongs there rather than
 copied into one project.
+
+## Out-of-sample retest, registered 2026-09-07 before running
+
+The run above pooled 18 years (2008-2026) into one number. That is not
+just noisy across regimes — a financial crisis, a zero-rate decade, a
+pandemic crash, a rate-hike bear market and the current bull market are
+not the same market — it is also not evidence about what is tradable
+now if the effect is regime-dependent, and the pooled run never isolated
+any single regime on its own.
+
+**Window: 2023-01-01 through 2025-12-31.** Three complete calendar
+years. Chosen to be the most recent regime that is actually complete:
+clear of 2022's rate-hike selloff on one side, clear of 2026's
+still-accruing data on the other — a 63-trading-day forward return
+needs room after the filing date to resolve, and events filed in mid-
+2026 mostly do not have that room yet. If the effect does not hold here,
+what the 2008-2022 data showed does not matter for anything tradable
+today.
+
+**Everything else is unchanged from the original registration**: same
+three controls, same |t| >= 3.0 bar, same cost model, same two-way
+clustering. Nothing is being adjusted after seeing this window's own
+numbers — this section was written before it was run.
+
+**What would count as each outcome, restated for this window:**
+support if code P clears every control at |t| >= 3.0 at 5 and 21
+trading days (63 days already failed on the full sample and is not
+expected to pass here either); refuted if it does not; partial if it
+clears at one of the two horizons only. The 63-day horizon is reported
+for completeness but does not change the verdict, since the full-sample
+run already showed that decaying to a company-level trait rather than
+timing information.
+
+## Out-of-sample result, run 2026-09-07
+
+**Outcome: partial, same category as the pooled run, for a different
+reason.** ~55,000 code-P filings, 2023-2025 only.
+
+| horizon | insider-buy raw | passive (hold IWM) | P vs zero | P vs random | P vs shuffled | P vs code-S |
+|---|---|---|---|---|---|---|
+| 5d  | +2.59% | +0.41% | +2.18%, t=+11.80 | +2.25% diff, t=+12.56 | +2.34% diff, t=+12.16 | +2.17% diff, t=+10.52 |
+| 21d | +3.23% | +1.55% | +1.67%, t=+5.28  | +2.08% diff, t=+6.77  | +2.35% diff, t=+7.50  | **+1.40% diff, t=+2.81** |
+| 63d | +6.54% | +4.23% | +2.30%, t=+2.21  | +3.45% diff, t=+3.23  | +3.97% diff, t=+3.76  | +2.51% diff, t=+2.00 |
+
+As before, the first two columns are absolute returns; everything after
+is excess over the passive column.
+
+**5 days clears every control comfortably.** Same conclusion as the
+pooled 18-year run, at a similar or larger margin — the one-month
+signal is the piece that replicates cleanly in the current regime.
+
+**21 days clears random and shuffled but falls short against code-S**
+(t=2.81, under the 3.0 bar by a small margin). In this window, insider
+*sales* carry nearly as much of the same 21-day signal as purchases do
+— the two are harder to tell apart here than in the pooled sample,
+where the code-S margin was the widest of the three (t=6.97). That is
+the actual finding worth sitting with, not the miss on a threshold by
+0.19 of a t-statistic.
+
+**63 days does not replicate the earlier decay story.** In the pooled
+run, the shuffled-date control caught up completely by 63 days,
+implying no timing information survived that long. Here, in the recent
+regime, purchases still clearly beat both random tickers and shuffled
+dates at 63 days (t=3.23, t=3.76) — but still lose to code-S (t=2.00).
+The mechanism by which the effect fades looks different in this regime
+than in the pooled sample; both windows agree only that it does not
+cleanly survive to 63 days against every control.
+
+**Reading across both runs:** the 5-day effect is the one that holds up
+identically whether measured across 18 years or the most recent 3. The
+21- and 63-day effects are real by some comparisons in both windows but
+never clear all three controls together in either one, and the way they
+fail differs between the two periods, which itself argues against
+treating those horizons as a stable effect at all. Still not acted on.
+The registered follow-up splits (dollar size, insider role) and the
+Stata cross-check remain the required next steps before this changes
+status.

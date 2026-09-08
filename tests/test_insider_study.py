@@ -9,12 +9,33 @@ pieces) are covered by running the real study, not by a unit test — a
 synthetic `tickers`/`insiders`/`prices` schema would just be a second,
 unsynchronised copy of the real one to keep correct.
 """
+import sqlite3
 import unittest
 
 import numpy as np
 import pandas as pd
 
 from screener import insider_study as study
+
+
+def _memory_archive():
+    """A minimal in-memory stand-in for the two tables `insider_events`
+    reads, just enough columns to exercise the date-window filter
+    without needing the real archive present."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE tickers (tbl, ticker, exchange, category, "
+                 "firstpricedate, lastpricedate)")
+    conn.execute("INSERT INTO tickers VALUES "
+                 "('SEP', 'AAA', 'NASDAQ', 'Domestic Common Stock', "
+                 "'2000-01-01', '2030-01-01')")
+    conn.execute("CREATE TABLE insiders (ticker, filingdate, transactioncode)")
+    conn.executemany("INSERT INTO insiders VALUES (?, ?, ?)", [
+        ("AAA", "2021-06-01", "P"),
+        ("AAA", "2023-03-01", "P"),
+        ("AAA", "2024-07-01", "P"),
+        ("AAA", "2026-01-01", "P"),
+    ])
+    return conn
 
 
 def _series(start_price, n_days, daily_return=0.0, start_date="2020-01-01"):
@@ -126,6 +147,29 @@ class TwoWayTestTest(unittest.TestCase):
         self.assertLess(abs(out["tvalue"]), 2.5)
 
 
+class RawVsPassiveTest(unittest.TestCase):
+    """The house rule that a strategy result is never reported as a bare
+    excess without the two absolute numbers it was computed from."""
+
+    def test_passive_recovers_the_benchmark_leg(self):
+        # mean(raw) = 4.0, mean(abnormal) = 1.5, so passive = 2.5 — the
+        # subtraction happens on the two means, not row by row.
+        frame = pd.DataFrame({"raw_pct": [5.0, 3.0], "abnormal_pct": [2.0, 1.0]})
+        raw, passive = study.raw_vs_passive(frame)
+        self.assertAlmostEqual(raw, 4.0)
+        self.assertAlmostEqual(passive, 2.5)
+
+    def test_zero_excess_means_raw_and_passive_are_equal(self):
+        frame = pd.DataFrame({"raw_pct": [1.5, 1.5], "abnormal_pct": [0.0, 0.0]})
+        raw, passive = study.raw_vs_passive(frame)
+        self.assertAlmostEqual(raw, passive)
+
+    def test_an_empty_frame_returns_nan_not_an_error(self):
+        raw, passive = study.raw_vs_passive(pd.DataFrame({"raw_pct": [], "abnormal_pct": []}))
+        self.assertTrue(np.isnan(raw))
+        self.assertTrue(np.isnan(passive))
+
+
 class MeanVsZeroTest(unittest.TestCase):
     def test_a_nonzero_mean_is_detected(self):
         rng = np.random.default_rng(2)
@@ -154,6 +198,36 @@ class ShuffledControlTest(unittest.TestCase):
         # Same tickers appear, but not necessarily paired with their own
         # original date — that recombination is the entire point.
         self.assertEqual(set(out["ticker"]) <= {"AAA", "BBB"}, True)
+
+
+class InsiderEventsDateWindowTest(unittest.TestCase):
+    """The 2023-2025 out-of-sample retest depends on this filter actually
+    restricting which filings are looked at, not just being accepted and
+    ignored."""
+
+    def setUp(self):
+        self.conn = _memory_archive()
+        self.addCleanup(self.conn.close)
+        self.eligible = study.eligible_tickers(self.conn)
+
+    def test_no_window_returns_every_filing(self):
+        out = study.insider_events(self.conn, self.eligible)
+        self.assertEqual(len(out), 4)
+
+    def test_a_window_keeps_only_filings_inside_it(self):
+        out = study.insider_events(self.conn, self.eligible,
+                                   filing_start="2023-01-01", filing_end="2025-12-31")
+        self.assertEqual(sorted(out["filingdate"]), ["2023-03-01", "2024-07-01"])
+
+    def test_the_window_boundaries_are_inclusive(self):
+        out = study.insider_events(self.conn, self.eligible,
+                                   filing_start="2023-03-01", filing_end="2023-03-01")
+        self.assertEqual(list(out["filingdate"]), ["2023-03-01"])
+
+    def test_an_empty_window_returns_no_rows_not_an_error(self):
+        out = study.insider_events(self.conn, self.eligible,
+                                   filing_start="2027-01-01", filing_end="2027-12-31")
+        self.assertEqual(len(out), 0)
 
 
 class RandomControlTest(unittest.TestCase):
