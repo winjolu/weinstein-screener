@@ -128,12 +128,17 @@ X1. **Does institutional crowding explain momentum's failure here?**
   it is institutional holdings, the "I" in CAN SLIM, and F1 needs it.
 
 ## Next, in order
-0a. **Run I1 — the insider study.** Registered 2026-08-31. The only
-   orthogonal signal available and the only one with a mechanism behind
-   it. Run in Python and again in Stata (free through CSUSM) as an
-   independent check; report only if both agree. F1 is also registered
-   and unrun — it is in preregistered-tests.md but was never listed
-   here, which is how a registered test gets forgotten.
+0a. ~~**Run I1 — the insider study.**~~ Run 2026-09-07 in Python.
+   **Partial**: code P beats all three controls at 5 and 21 trading
+   days at |t| >= 3.0; at 63 days the shuffled-date control catches up
+   completely, meaning the 63-day return is a company trait rather than
+   filing-timing information. Full breakdown in
+   docs/preregistered-tests.md. Not acted on. **Still outstanding before
+   this moves past partial**: the Stata cross-check (free through
+   CSUSM), the C4 deflation adjustment, and only then the two
+   pre-registered follow-up splits (dollar size, insider role). F1 is
+   also registered and unrun — it is in preregistered-tests.md but was
+   never listed here, which is how a registered test gets forgotten.
 
 0. ~~**Re-run every published arm under a pinned configuration.**~~ Done
    2026-08-20 as B2. Ten arms re-run on a rebuilt 10,227-ticker cache,

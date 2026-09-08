@@ -129,7 +129,7 @@ not yet run · **defect** revealed a bug rather than a result
 
 | id | question | outcome |
 |---|---|---|
-| I1 | do insider open-market purchases (code P) predict abnormal returns | **open** — registered 2026-08-31, not yet run. An earlier unregistered look suggested +2.60% vs +1.03% absolute at 21 days; that does not count |
+| I1 | do insider open-market purchases (code P) predict abnormal returns | **partial** — run 2026-09-07. Beats all three controls at |t| > 3 at 5 and 21 trading days; at 63 days the shuffled-date control catches up completely (both ~+1.95%), so the 63-day return is a company trait, not filing timing. Not acted on; out-of-sample retest is the required next step |
 
 ## K — machine learning
 

@@ -4524,4 +4524,47 @@ Stata stays outside the pipeline — a second opinion, not a dependency.
 
 Split by dollar size of purchase and by insider role (officer, director,
 10% owner). Both splits are declared now; picking whichever split looks
-best afterwards is the thing this section prevents.
+best afterwards is the thing this section prevents. Not run yet — the
+partial outcome below calls for an out-of-sample retest before either
+split is looked at, per the pre-specified next step.
+
+## Result, run 2026-09-07
+
+**Outcome: partial.** Code P beats all three controls at |t| >= 3.0 at
+5 and 21 trading days. At 63 days it beats code-S but not the random or
+shuffled-date controls. Per the outcome definitions above, this is
+partial support, is not acted on, and is queued for an out-of-sample
+retest before anything else — including the two follow-up splits.
+
+613,221 code-P and 1,811,448 code-S filings passed the point-in-time
+universe filter (domestic common stock, real exchange, listed on the
+filing date). Costed abnormal return against IWM, clustered two-way by
+firm and by filing date:
+
+| horizon | P vs zero | P vs random (40 draws) | P vs shuffled dates | P vs code-S |
+|---|---|---|---|---|
+| 5d  | +1.63%, t=+15.25 | +1.42% diff, t=+12.74 | +1.59% diff, t=+10.53 | +1.85% diff, t=+16.38 |
+| 21d | +1.71%, t=+7.06  | +1.32% diff, t=+4.74  | +1.40% diff, t=+5.20  | +1.88% diff, t=+6.97  |
+| 63d | +1.94%, t=+4.26  | +0.40% diff, t=+0.45  | **-0.03% diff, t=-0.03** | +2.48% diff, t=+4.70 |
+
+**What the 63-day breakdown means.** The shuffled-date control keeps the
+same tickers and only randomises which filing date attaches to which —
+so it isolates "this kind of company tends to do well" from "this
+specific filing date carries information." At 5 and 21 days those are
+different: the real filing date beats the shuffled one clearly. At 63
+days they converge to the same number, which means whatever return
+insider-filing companies show three months out was already there before
+the specific purchase was filed. The timing information in the filing
+decays to nothing by the third month; the company-level tilt does not.
+
+**What is not yet done.** The two implementations were meant to agree —
+Python here, Stata separately — and Stata was never run; that check is
+outstanding and this result should be read as provisional until it
+happens. The C4 deflation-by-number-of-variants adjustment has not been
+applied either. Both belong before this moves past "partial."
+
+Code: `screener/insider_study.py`, tested in `tests/test_insider_study.py`.
+The two-way clustering this needed did not exist anywhere in the shared
+package and was added as `market_core.timeseries.cluster_two_way` and
+`cluster_mean`, since a data-layer capability belongs there rather than
+copied into one project.
