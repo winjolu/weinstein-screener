@@ -89,15 +89,29 @@ class ApiKeyTest(unittest.TestCase):
 
 
 class PaginationTest(_Stubbed):
+    """Paging still works when asked for, and is refused by default.
+
+    The vendor's offset pages overlap: identical requests for the
+    securities list returned the same row count with thousands fewer
+    distinct tickers each time. So a result larger than one page is only
+    walked when the caller explicitly accepts that it may be incomplete.
+    """
+
+    def test_a_full_first_page_is_refused_by_default(self):
+        self.stub([[{"a": "1"}] * 10000, [{"a": "2"}] * 3])
+        with self.assertRaises(sharadar.PagingUnreliable):
+            sharadar.fetch("stocks")
+        self.assertEqual(len(self.calls), 1)
+
     def test_a_short_page_ends_the_walk(self):
         self.stub([[{"a": "1"}] * 10000, [{"a": "2"}] * 3])
-        rows = sharadar.fetch("stocks")
+        rows = sharadar.fetch("stocks", paginate=True)
         self.assertEqual(len(rows), 10003)
         self.assertEqual(len(self.calls), 2)
 
     def test_the_offset_advances_by_the_page_size(self):
         self.stub([[{"a": "1"}] * 10000, []])
-        sharadar.fetch("stocks")
+        sharadar.fetch("stocks", paginate=True)
         self.assertEqual(self.calls[0][1]["skip"], 0)
         self.assertEqual(self.calls[1][1]["skip"], 10000)
 
@@ -111,7 +125,7 @@ class PaginationTest(_Stubbed):
         # there would silently truncate; the API gives no total, so the
         # only safe read is to ask again.
         self.stub([[{"a": "1"}] * 10000, []])
-        sharadar.fetch("stocks")
+        sharadar.fetch("stocks", paginate=True)
         self.assertEqual(len(self.calls), 2)
 
 
@@ -203,11 +217,16 @@ class RefreshTest(_Stubbed):
         self.addCleanup(os.remove, path)
         return path
 
-    def test_it_asks_only_for_dates_after_what_we_hold(self):
+    def test_it_asks_from_the_newest_date_we_hold(self):
+        """On or after, not strictly after. SF1 ignores a strict `date.gt`
+        and returns a year of rows, which appended 672,327 duplicate
+        fundamentals before it was noticed. The boundary day is asked for
+        again and rows already held on it are skipped."""
         path = self._db()
         self.stub([[]])
         sharadar.refresh("prices", db_path=path)
-        self.assertEqual(self.calls[0][1]["date.gt"], "2026-08-04")
+        self.assertEqual(self.calls[0][1]["date.gte"], "2026-08-04")
+        self.assertNotIn("date.gt", self.calls[0][1])
 
     def test_new_rows_are_appended(self):
         path = self._db()
