@@ -228,6 +228,14 @@ X1. **Does institutional crowding explain momentum's failure here?**
   without one is priced as an ordinary gap even in the week before it
   reports.
 
+## Method
+- **Record a minimum detectable effect with every registered test.** The
+  annual-rebalance tests can detect an excess of about 6 points a year
+  (27 years, tracking error 11.42), larger than any plausible premium, so
+  their nulls are inconclusive rather than refutations. The rule belongs
+  in `~/market-data/market-core/METHODOLOGY.md`, and the existing nulls in
+  the test register need relabelling to match.
+
 ## Housekeeping
 - ~~**Move the repository out of the synced folder.**~~ Done 2026-09-23:
   a fresh clone now lives outside it, 871 tests passing on a rebuilt
