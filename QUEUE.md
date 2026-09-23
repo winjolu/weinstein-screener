@@ -215,10 +215,23 @@ X1. **Does institutional crowding explain momentum's failure here?**
   have no interest in owning, or the sample measures my judgement rather
   than the indicator.
 
+## The discretionary register — kept outside this repo
+- **Calibrate the gap overshoot.** The bad-morning cap adds a flat 10% to
+  every stop, a round number chosen to be uncomfortable rather than
+  measured. The archive can measure it: the distribution of overnight
+  gaps through a stop on market-wide down days. A gap larger than the
+  allowance is bounded by neither cap.
+- **Back the register up offsite.** The market archive is now locked
+  against deletion; the register has no copy anywhere, and unlike the
+  archive it cannot be re-fetched from anyone.
+- **Record the next earnings date for every open position.** A position
+  without one is priced as an ordinary gap even in the week before it
+  reports.
+
 ## Housekeeping
-- `data/` holds 8GB of leftovers inside the synced folder:
-  `sharadar.db.driveback` at 6.3GB, `daily_bars.pkl` at 1.6GB,
-  `weekly_bars.pkl` at 334MB, and `screener.db.moved-20260806`. The live
-  database is in application support and the live market data is in
-  ~/market-data, so these are all stale copies being uploaded for
-  nothing.
+- ~~**Move the repository out of the synced folder.**~~ Done 2026-09-23:
+  a fresh clone now lives outside it, 871 tests passing on a rebuilt
+  virtualenv. The synced copy was ten commits behind with a corrupt tree.
+  It still holds 8GB of stale data (`sharadar.db.driveback` at 6.3GB, the
+  bar caches, `screener.db.moved-20260806`) and is waiting to be deleted
+  wholesale, which disposes of those too.
