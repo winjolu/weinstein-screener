@@ -198,5 +198,94 @@ class ReadOnlyTest(unittest.TestCase):
             self.assertNotIn(forbidden, source)
 
 
+class OrderHistoryTest(unittest.TestCase):
+    """The endpoint answers an undated request with an empty list.
+
+    No error, HTTP 200, nothing to notice — so the caller concludes the
+    account has never had an order. TEAM showed as unprotected with
+    apparently no order behind it; the stop was there, cancelled, and the
+    undated call simply could not see it.
+    """
+
+    def setUp(self):
+        self.calls = []
+        self._real_call = broker._call
+        self._real_client = broker._client
+        self._real_account = broker.account_id
+        broker.account_id = lambda *a, **k: "ACCT"
+        self.addCleanup(setattr, broker, "_call", self._real_call)
+        self.addCleanup(setattr, broker, "_client", self._real_client)
+        self.addCleanup(setattr, broker, "account_id", self._real_account)
+
+    def _vendor(self, rows):
+        """Mimics the real endpoint: dates required, page size capped."""
+        def call(fn, *args, **kwargs):
+            self.calls.append(args)
+            account, page_size, start, end = (list(args) + [None] * 4)[:4]
+            if page_size and page_size > 100:
+                raise broker.BrokerError("HTTP 417 invalid page_size")
+            if not start or not end:
+                return []
+            return rows
+        broker._call = call
+        broker._client = lambda: type("C", (), {"order_v3": type("O", (), {
+            "get_order_history": staticmethod(lambda *a, **k: None)})()})()
+
+    def _team_stop(self, status="CANCELLED"):
+        return [{"orders": [{"symbol": "TEAM", "side": "SELL",
+                             "order_type": "STOP_LOSS_LIMIT", "stop_price": "160.00",
+                             "limit_price": "150.00", "total_quantity": "10",
+                             "filled_quantity": "0", "status": status,
+                             "place_time_at": "2026-08-10T15:04:57.180Z",
+                             "client_order_id": "abc"}]}]
+
+    def test_a_date_range_is_always_sent(self):
+        self._vendor(self._team_stop())
+        broker.order_history()
+        account, page_size, start, end = self.calls[0]
+        self.assertEqual(account, "ACCT")
+        self.assertTrue(start and end, "no date range was sent")
+        self.assertLess(start, end)
+
+    def test_the_page_size_is_capped_at_what_the_vendor_accepts(self):
+        self._vendor(self._team_stop())
+        broker.order_history(page_size=500)
+        self.assertEqual(self.calls[0][1], 100)
+
+    def test_legs_are_flattened_out_of_the_combo(self):
+        self._vendor(self._team_stop())
+        out = broker.order_history()
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["ticker"], "TEAM")
+        self.assertEqual(out[0]["stop_price"], 160.0)
+        self.assertEqual(out[0]["limit_price"], 150.0)
+        self.assertEqual(out[0]["status"], "CANCELLED")
+
+    def test_an_empty_history_raises_rather_than_reading_as_fact(self):
+        """An account with positions has an order history. Returning []
+        lets a wrong call look like a true answer."""
+        self._vendor([])
+        with self.assertRaises(broker.EmptyHistory):
+            broker.order_history()
+
+    def test_an_empty_history_can_be_accepted_deliberately(self):
+        self._vendor([])
+        self.assertEqual(broker.order_history(strict=False), [])
+
+    def test_a_cancelled_stop_is_visible_in_the_protection_history(self):
+        """`unprotected` says a position has no stop. This says whether
+        one was ever placed, which is the difference between an oversight
+        and a stop that went away."""
+        self._vendor(self._team_stop())
+        hist = broker.protection_history("team")
+        self.assertEqual(len(hist), 1)
+        self.assertEqual(hist[0]["status"], "CANCELLED")
+        self.assertEqual(hist[0]["stop_price"], 160.0)
+
+    def test_a_ticker_with_no_stops_returns_nothing(self):
+        self._vendor(self._team_stop())
+        self.assertEqual(broker.protection_history("NVDA"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -244,11 +244,86 @@ def open_orders(account=None):
     return out
 
 
-def order_history(account=None):
-    """Completed orders, for folding into the recommendation log."""
-    data = _call(_client().order_v3.get_order_history, account or account_id())
-    return data if isinstance(data, list) else (
+# The history endpoint needs an explicit window and refuses a page larger
+# than this. Both were learned the hard way; see order_history.
+MAX_HISTORY_PAGE = 100
+DEFAULT_HISTORY_DAYS = 400
+
+
+class EmptyHistory(BrokerError):
+    """The account holds positions but reported no order history at all.
+
+    Raised rather than returned, because an empty list is what a wrong
+    call looks like and it reads as fact. Asking without a date range
+    returns `[]` with no error, which is how a cancelled stop on TEAM
+    went unexplained: the position showed as unprotected and there was
+    apparently no order behind it. The order was there the whole time.
+    """
+
+
+def order_history(account=None, days=DEFAULT_HISTORY_DAYS, page_size=MAX_HISTORY_PAGE,
+                  strict=True):
+    """Completed and cancelled orders over the last `days`.
+
+    **A date range is required in practice.** Calling without one returns
+    an empty list and HTTP 200 — no error, nothing to notice — so a
+    caller sees "no orders ever" and believes it. The window is explicit
+    here for that reason, and `strict` turns a suspicious empty result
+    into an exception instead of a fact.
+
+    The page size is capped because the vendor answers 417 to anything
+    above 100, and the flattened combo shape matches `open_orders`: the
+    history nests each leg under a combo, so a stop that was cancelled
+    and replaced appears as two legs rather than one order.
+    """
+    import datetime
+    account = account or account_id()
+    page_size = min(int(page_size), MAX_HISTORY_PAGE)
+    today = datetime.date.today()
+    start = (today - datetime.timedelta(days=int(days))).isoformat()
+    data = _call(_client().order_v3.get_order_history, account, page_size,
+                 start, today.isoformat())
+    combos = data if isinstance(data, list) else (
         data.get("items") or data.get("orders") or [])
+    out = []
+    for combo in combos:
+        for leg in (combo.get("orders") or [combo]):
+            if not leg.get("symbol"):
+                continue
+            out.append({
+                "ticker": leg["symbol"].upper(),
+                "side": leg.get("side"),
+                "order_type": leg.get("order_type"),
+                "stop_price": _number(leg.get("stop_price")),
+                "limit_price": _number(leg.get("limit_price")),
+                "quantity": _number(leg.get("total_quantity")),
+                "filled_quantity": _number(leg.get("filled_quantity")),
+                "status": leg.get("status"),
+                "placed_at": leg.get("place_time_at"),
+                "client_order_id": leg.get("client_order_id"),
+            })
+    if strict and not out:
+        raise EmptyHistory(
+            f"no orders in the last {days} days for {account}. An account "
+            f"holding positions has an order history, so this is more likely "
+            f"a bad request than an empty account — check the date range and "
+            f"page size before believing it.")
+    return out
+
+
+def protection_history(ticker, account=None, days=DEFAULT_HISTORY_DAYS):
+    """Every stop ever placed on one ticker, newest first.
+
+    The question worth asking when a position shows as unprotected: was
+    there never a stop, or was there one that went away? TEAM carried a
+    stop at 160 with a 150 limit, placed on 2026-08-10, and it was
+    cancelled without being replaced. `unprotected` reported the position
+    correctly and could not say why.
+    """
+    stops = [o for o in order_history(account, days=days)
+             if str(o.get("order_type", "")).startswith("STOP")
+             and o.get("ticker") == ticker.upper()]
+    return sorted(stops, key=lambda o: o.get("placed_at") or "", reverse=True)
 
 
 def unprotected(held, orders):
