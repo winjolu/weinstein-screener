@@ -22,6 +22,7 @@ convention as it actually emerged.
 | **B** | **Benchmark** — what the strategy is measured against. |
 | **C** | **Chan** — methodology adopted from the Chan text: selection bias, minimum track record, stationarity. |
 | **I** | **Insider** — SEC Form 4 filings as a signal. |
+| **GP** | **Gap** — overnight price gaps as a signal. |
 | **K** | **K-nearest neighbour** — the single machine-learning test. |
 
 ## Status legend
@@ -124,6 +125,12 @@ not yet run · **defect** revealed a bug rather than a result
 | id | question | outcome |
 |---|---|---|
 | C4 | does the best arm survive being discounted by the size of the search | **closed** — probabilistic Sharpe 0.998 falls to **0.535** deflated over 237 trials. The best configuration clears the selection-adjusted bar by 0.0033 weekly |
+
+## GP — price gaps
+
+| id | question | outcome |
+|---|---|---|
+| GP1 | is a gap of 10+ points over the market followed by a fade, and does a short survive borrow | **refuted** — run 2026-09-18, by its own registered rule: the fade survives only in microcaps. Above them, only small-caps pooled reach \|t\| = 3 (-1.64% at 21 days, t=-3.06) and they fail in 2023-2025 (t=-1.87); mid and large show nothing (\|t\| ≤ 0.8 at 21 days). Microcaps fade enormously (-27.5% at 63 days in 2023-2025, t=-15.6), in exactly the names that cannot be borrowed and where the archive's volume defect sits. Down-gaps fade about as hard, so this is volatility and attention, not direction. Registration restored 2026-09-23 after the original write was lost |
 
 ## I — insider filings
 

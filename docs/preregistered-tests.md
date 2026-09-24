@@ -4937,3 +4937,166 @@ The findings carried forward — the H1 and H4 inversions and the H5 tail
 — sit at |t| of 6 to 13 and survive any reasonable deflation, but they
 have not been formally deflated per C4 and should not be quoted as if
 they had.
+
+---
+
+# PRE-REGISTRATION — GP1: is a large gap followed by a fade?
+
+Written 2026-09-18, before the confirmatory run.
+
+> **Restored 2026-09-23.** This registration was written on 2026-09-18,
+> before the confirmatory run, but the write was lost when the synced
+> folder it was being saved into failed. The text below is recovered
+> verbatim from the working record of that day; only this note is new.
+> The result was already known when it was restored, which is the reason
+> for saying so rather than letting the date above stand alone.
+
+## What is already known, and therefore not blind
+
+An exploratory pass over 12,957,903 gap observations (2007-2026,
+tradeable names) has already been run and seen. Buying at the gap day's
+close, against IWM, and after subtracting the -0.52% that the average
+stock in this universe lags IWM over 63 days anyway:
+
+| gap | 21 days | 63 days | beat index at 63d |
+|---|---|---|---|
+| +2 to 5% | -0.12% | -0.52% | 43% |
+| +5 to 10% | -0.54% | -0.86% | 41% |
+| above +10% | -2.14% | **-4.27%** | 37% |
+| below -5% | -1.17% | -1.34% | 42% |
+
+**That result does not count.** It was not registered, the thresholds
+were chosen while looking, the gap was measured against the prior close
+without adjusting for the market's own gap, and no cost of any kind was
+charged. It is the reason to look properly, not evidence.
+
+## Hypothesis, stated before the run
+
+**H1.** A stock whose opening gap exceeds the market's own gap by 10
+percentage points or more is followed by negative abnormal returns over
+21 and 63 trading days, large enough to survive borrow and spread.
+
+**H2.** The effect increases with the size of the gap.
+
+**H3.** The effect is not confined to microcaps, which cannot be
+shorted in practice.
+
+## Design, fixed now
+
+- **The gap is measured against the market.** Stock open over prior
+  close, minus IWM open over prior close. The whole market gapped
+  +1.42% on 2026-09-17 and 662 names looked like they had gapped; 183
+  had. Measuring against the prior close alone counts market mornings
+  as stock-specific news.
+- **Entry at the gap day's close**, never the open. The open is the
+  price being measured and cannot be traded on.
+- **Horizons 5, 21 and 63 trading days**, fixed now, no additions.
+- **Abnormal return against IWM** over the identical window, and
+  reported against the all-days baseline for the same universe, since
+  the average stock here lags the index.
+- **Universe:** domestic common stock, real exchange, listed at the
+  event, close >= $5, median dollar volume over the prior 20 sessions
+  >= $1M.
+- **Size buckets** by market capitalisation: micro under $300M, small
+  $300M-2B, mid $2-10B, large above $10B. H3 is judged above microcap.
+- **Windows:** pooled 2007-2026, and 2023-2025 alone as the recent
+  regime, both reported.
+- **Significance** on the daily cross-sectional mean series with
+  Newey-West standard errors at 10 lags, which handles the heavy
+  overlap between events on the same day.
+
+## Costs, which decide this
+
+The trade is a short. Borrow is charged on a 360-day basis at **1%**
+(general collateral) and **8%** (hard to borrow), and slippage is swept
+at **0.10%, 0.25% and 0.50% per side**, charged twice. The breakeven
+slippage is reported for every bucket.
+
+No borrow-availability data exists in this archive, and a stock that
+has just gapped 10% is exactly the one that is dear or impossible to
+borrow. **Every figure here is an upper bound on what was achievable.**
+
+## What counts as each outcome
+
+- **Support:** H1 holds at |t| >= 3.0 in both windows, above microcap,
+  after 8% borrow and 0.25% slippage per side.
+- **Partial:** holds in one window, or only before costs.
+- **Refuted:** fails either, or survives only in microcaps.
+- **Expected: partial at best.** The raw effect is large, but it sits
+  in the names hardest to borrow, and this project's record is that
+  every apparent edge has been a measurement artifact.
+
+## What would make it actionable
+
+Nothing here. Even a supportive result needs a forward paper record
+before any money, per the standing rule that a backtest is not
+evidence of tradability.
+
+---
+
+# GP1 RESULT — refuted: the fade lives in microcaps
+
+Run 2026-09-18 on `screener/gap_study.py`. Excess returns below are
+against IWM, **net of the average stock's own lag behind IWM** over the
+same horizon (the "vs base" figure), before costs, buying at the gap
+day's close. A negative number is a fade.
+
+## The registered test: gap of 10+ points over the market, above microcap, 21 days
+
+| size | pooled 2007-2026 | recent 2023-2025 |
+|---|---|---|
+| small $300M-2B | -1.64%, t=-3.06 | -1.56%, t=-1.87 |
+| mid $2-10B | -0.02%, t=-0.14 | -0.31%, t=-0.55 |
+| large >$10B | -0.54%, t=-0.80 | +0.04%, t=+0.03 |
+
+Support required |t| ≥ 3.0 in both windows, above microcap, after
+costs. Small-caps clear it once, pooled, and before costs; they fail in
+the recent window. Mid and large show nothing at any horizon: t runs
+from -0.69 to +0.51 across 5, 21 and 63 days in both windows.
+**"Survives only in microcaps" was written down in advance as refuted.**
+
+## What sits in microcaps
+
+| micro < $300M | 21 days | 63 days |
+|---|---|---|
+| pooled 2007-2026 | -10.24%, t=-9.12 | -17.02%, t=-11.15 |
+| recent 2023-2025 | -15.38%, t=-7.94 | -27.48%, t=-15.64 |
+
+Enormous, and I do not believe it is tradeable or entirely real.
+Sub-$300M names that gap 10% are the dilution and reverse-split
+population, borrow there is usually unavailable at any price, and the
+quantised-volume defect found in D4 lives in exactly that corner. It is
+a data question worth asking, not a trade.
+
+## Down-gaps fade too
+
+A gap of 10+ points *below* the market is followed by -2.63% at 21 days
+pooled (t=-6.84) against -3.06% for up-gaps (t=-7.75). Both directions
+underperform about equally, so this is a volatility-and-attention
+effect, not a directional signal. Shorting the up-gaps captures half of
+something that is not about the gap's sign.
+
+## Why the reported t-values are upper bounds
+
+The docstring of `screener/gap_study.py` records four places where the
+run departs from the registration: the t-value is on the uncosted mean
+rather than the costed excess, 10 Newey-West lags fall short of the
+21- and 63-day overlap, events that delist inside their horizon are
+dropped, and breakeven slippage is not broken out by size bucket. Every
+one of them inflates |t| or leaves it untested. None can turn this
+refutation into support; the small-cap pooled t of -3.06 would fall
+below 3 on the costed excess alone, which only strengthens the verdict.
+
+## Reproduction
+
+The registration and the script were both lost when the synced folder
+failed, and restored on 2026-09-23 from the working record. The restored
+script was re-run that day on the repaired archive:
+
+- **2023-2025: identical, line for line.**
+- **Pooled: 12,966,079 events against 12,957,903 (+0.06%)**, from trading
+  days added since the run and the archive repair. Every figure moves in
+  the second decimal at most; the largest is a small-cap 63-day t going
+  from -2.21 to -2.24. No verdict changes.
+
+The figures above are the original run's.

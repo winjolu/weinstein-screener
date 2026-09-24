@@ -221,6 +221,11 @@ X1. **Does institutional crowding explain momentum's failure here?**
   measured. The archive can measure it: the distribution of overnight
   gaps through a stop on market-wide down days. A gap larger than the
   allowance is bounded by neither cap.
+  Plan written 2026-09-23 in `~/quant/decisions/calibration/`, with the
+  pick rule fixed before running. Earnings mornings are excluded, since
+  the policy already counts those at full value, and stress mornings are
+  a second set rather than the only one. Waits on confirming the 95th
+  percentile as the adopted quantile.
 - **Back the register up offsite.** The market archive is now locked
   against deletion; the register has no copy anywhere, and unlike the
   archive it cannot be re-fetched from anyone.
