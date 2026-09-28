@@ -247,4 +247,17 @@ X1. **Does institutional crowding explain momentum's failure here?**
   virtualenv. The synced copy was ten commits behind with a corrupt tree.
   It still holds 8GB of stale data (`sharadar.db.driveback` at 6.3GB, the
   bar caches, `screener.db.moved-20260806`) and is waiting to be deleted
-  wholesale, which disposes of those too.
+  wholesale, which disposes of those too. Checked again 2026-09-28: the
+  synced copy's tree is now unreadable outright (`git fsck` reports a
+  missing tree object on HEAD), confirming it should be deleted rather
+  than repaired.
+- **Offsite copy of the market archive itself.** `sharadar.db` (19.7GB,
+  irreplaceable beyond one year back) has never had a copy off this
+  laptop — a separate gap from the register backup above, and a bigger
+  one. Written and unit-tested 2026-09-27 in `market-archive`:
+  `loader/offsite.py` (restic to B2 over its S3 interface, keeping 4
+  weekly + 12 monthly copies) and a daily launchd job, not yet loaded.
+  Handoff at `market-archive/HANDOFF.md`. *Blocker: restic installed, a
+  B2 bucket and key set up by hand, a repository password stored
+  somewhere other than this laptop — then `--init`, a first upload, and
+  `--restore-test` before the job is loaded.*
