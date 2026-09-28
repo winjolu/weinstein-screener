@@ -5100,3 +5100,67 @@ script was re-run that day on the repaired archive:
   from -2.21 to -2.24. No verdict changes.
 
 The figures above are the original run's.
+
+---
+
+# EXPLORATORY RESULT — X1 — does a once-a-year long-only tilt beat the index?
+
+Run 2026-09-23, `~/market-data/derived/annual_tilt/annual_tilt.py`. **Not
+pre-registered.** The five signals were chosen from the standing strategy
+catalogue before running, but the top-quintile cut, the 12-month hold and
+the composite-of-five design were fixed while building the script, not
+committed to a file first. Recorded here as exploratory rather than in
+the pre-registered form, per the standing rule that a test written up
+after the result is known is not a test.
+
+## Design, as run
+
+Point-in-time throughout: a signal on rebalance date D (30 June each
+year, 1999-2025) uses only fundamentals filed on or before D, and the
+universe is whoever was actually listed and liquid on D, survivors and
+casualties both. Universe: domestic common stock on a real exchange,
+price >= $5, 20-day median dollar volume >= $1M. Top quintile by signal,
+held 12 months, no rebalancing inside the year. Five signals, treated as
+one family and one question rather than five separate tests: gross
+profitability, cash-flow yield, low asset growth, low share issuance,
+low book leverage.
+
+## Result: inconclusive, not refuted
+
+**Equal-weight composite: +1.21 points a year mean excess over SPY,
+t = +0.55, n = 27 years.** Compounded, +8.98% a year against SPY's
++8.37% — both total return. This is the headline number and the one
+that matters: **the test could only have detected an excess of about 6
+points a year** (27 non-overlapping years, tracking-error SD 11.42), so
+a null this size says nothing about whether a smaller, real edge exists.
+
+Individually, no signal reaches |t| >= 2 against either benchmark.
+Cash-flow yield and low share issuance are the closest (t = 1.16-1.26).
+Low book leverage is negative against IWM (t = -2.26) on too little
+power to call that a finding either.
+
+**The value-weight composite looks better and is not credible.**
++1.86 points a year excess, t = +2.37 raw — but it is the best of 20
+individual signal x benchmark combinations tried, and the Sidak-adjusted
+family-wise p-value is 0.30. It is also almost entirely a first-half
+effect (1999-2012 t = 3.37, 2013-2025 t = 0.62) and the composite
+correlates 0.968 with SPY, which is a beta exposure wearing a factor
+label, not a return premium. **Refuted as a finding**, independent of
+the family's overall power problem.
+
+Hit rate: the equal-weight composite beat SPY in 52% of 27 years,
+consistent with a coin flip.
+
+## What this changes and does not change
+
+Consistent with the standing conclusion that nothing in this project's
+long-only universe clears a meaningful bar against the index (see B2).
+It does not add evidence either way on the family's five signals
+individually — the sample is too short relative to their volatility to
+speak to that, and a longer or broader sample would be needed to.
+
+## Reproduction
+
+Script, log and parquet output preserved at
+`~/market-data/derived/annual_tilt/` (originally written to `/private/tmp`
+and `/tmp`, which do not survive).

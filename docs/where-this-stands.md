@@ -1,6 +1,7 @@
 # Where this stands
 
-Current state of belief, as of 2026-08-06. `preregistered-tests.md` is
+Current state of belief, as of 2026-08-06, with
+the survivorship and unresolved sections brought up to 2026-09-23. `preregistered-tests.md` is
 the audit trail and records tests in the order they were run, including
 the ones I got wrong and withdrew. This is the summary that sits on top
 of it.
@@ -103,16 +104,20 @@ One qualification, which is a real one and not a hedge: the corrected
 universes are also 3.3x larger, because point-in-time construction adds
 the small names the old universe never contained as well as the dead
 ones. Part of the collapse may be trading names too illiquid to trade.
-The liquidity-filtered arm that separates these is running.
+The liquidity-filtered arms settled that in B2: with a floor of $1M a
+day in median dollar volume, the rule still trails SPY in 2010-2020 by
+0.66 (R20) and 1.43 (M9) points, and in 2021-2026 by 13.55 and 11.21.
+Illiquid names were not the cause.
 
 ## What is unresolved, in order of how much it matters
 
-**1. Whether anything survives the correction.** Survivorship is no
-longer unresolved — it was measured and it inverted the result, exactly
-as the phantom-loss injection predicted it would. What is unresolved is
-whether a liquidity floor recovers any of it, or whether the method
-simply does not beat the index outside a crash. Those are very different
-outcomes and the arm deciding between them is running.
+**1. Whether anything survives the correction — answered: no.**
+Survivorship was measured and it inverted the result, exactly as the
+phantom-loss injection predicted. The liquidity floor recovers none of
+it (above), and B2 re-ran every published arm on a rebuilt cache under
+one recorded configuration: **no arm reaches |t| = 2 against SPY or
+against the size-matched IWM.** The method does not beat the index
+outside a crash.
 
 **1b. What idle capital does, which outweighs everything above.**
 Holding the index rather than cash between positions is worth three to
@@ -125,8 +130,10 @@ lose to it.
 **2. Statistical significance.** Harvey, Liu and Zhu (2016) argue a new
 factor needs t > 3.0 rather than 2.0, because hundreds have been tried
 against the same data, and that empirically-discovered factors need a
-higher bar than theory-derived ones. This project has run 25+ arms and
-mined its central rule from the winners. R20 never clears 3.0 and clears
+higher bar than theory-derived ones. This project has tried 237
+configurations, counted for C4, and mined its central rule from the
+winners. Discounted for that search, the best arm's probabilistic
+Sharpe falls from 0.998 to 0.535. R20 never clears 3.0 and clears
 2.0 once in three windows. The only arm clearing 3.0 anywhere is the
 trend rule taken unchanged from the literature.
 
@@ -135,9 +142,11 @@ window, against the index's 45-102. Three years and more. This is the
 largest practical obstacle to anyone actually holding this, and no
 drawdown-depth measure reveals it — only Ulcer and duration do.
 
-**4. Nothing has been traded, on paper or otherwise.** Every figure here
-is a backtest. The forward-record infrastructure exists and has logged
-nothing.
+**4. No tested rule has been traded, on paper or otherwise.** Every
+figure here is a backtest. The forward log holds 25 signals written
+2026-08-06, too recent to score. Positions opened by judgement rather
+than by any rule here are kept outside this repository, and they are
+not evidence for or against anything in it.
 
 ## What would change the conclusion
 
